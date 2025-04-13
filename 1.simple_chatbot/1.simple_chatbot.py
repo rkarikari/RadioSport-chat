@@ -4,16 +4,16 @@ from langchain_ollama import ChatOllama
 # pip install -qU langchain-ollama
 # pip install langchain
 
-st.title("🧠 Make Your Own Chat Application with Ollama and Langchain!!!")
+st.title("🧠 My Personal Chat App!!!")
 
-st.write("GET MORE INFO @ KGP Talkie: https://www.youtube.com/kgptalkie")
+st.write("GET MORE INFO @ Web:https://github.com/rkarikari/ollama-chatbot")
 
 with st.form("llm-form"):
     text = st.text_area("Enter your question or statement:")
     submit = st.form_submit_button("Submit")
 
 def generate_response(input_text):
-    model = ChatOllama(model="llama3.2:1b", base_url="http://localhost:11434/")
+    model = ChatOllama(model="phi4-mini:latest", base_url="http://localhost:11434/")
 
     response = model.invoke(input_text)
 
