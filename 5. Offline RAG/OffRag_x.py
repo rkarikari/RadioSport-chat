@@ -60,7 +60,10 @@ def setup_vector_store(chunks):
     Returns:
     - Vector store containing the document chunks.
     """
-    embeddings = OllamaEmbeddings(model='nomic-embed-text', base_url="http://localhost:11434")
+    #sentence-transformers/all-MiniLM-L6-v2
+    #nomic-embed-text
+    #embeddings = OllamaEmbeddings(model='nomic-embed-text', base_url="http://localhost:11434")
+    embeddings = OllamaEmbeddings(model='all-minilm', base_url="http://localhost:11434")
     single_vector = embeddings.embed_query("this is some text data")
     index = faiss.IndexFlatL2(len(single_vector))
     vector_store = FAISS(
