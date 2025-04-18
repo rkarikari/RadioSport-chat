@@ -60,10 +60,7 @@ def setup_vector_store(chunks):
     Returns:
     - Vector store containing the document chunks.
     """
-    #sentence-transformers/all-MiniLM-L6-v2
-    #nomic-embed-text
-    #embeddings = OllamaEmbeddings(model='nomic-embed-text', base_url="http://localhost:11434")
-    embeddings = OllamaEmbeddings(model='all-minilm', base_url="http://localhost:11434")
+    embeddings = OllamaEmbeddings(model='nomic-embed-text', base_url="http://localhost:11434")
     single_vector = embeddings.embed_query("this is some text data")
     index = faiss.IndexFlatL2(len(single_vector))
     vector_store = FAISS(
@@ -103,7 +100,7 @@ def create_rag_chain(retriever):
         Context: {context} 
         Answer:
     """
-    model = ChatOllama(model="phi4-mini:latest", base_url="http://localhost:11434")
+    model = ChatOllama(model="deepseek-r1:1.5b", base_url="http://localhost:11434")
     prompt_template = ChatPromptTemplate.from_template(prompt)
     
     # Response cleaner function
@@ -118,13 +115,6 @@ def create_rag_chain(retriever):
         | RunnableLambda(clean_response)  # Added cleaning step
     )
 
-@st.cache_resource(show_spinner="Processing document...")
-def cached_processing(file_path):
-    markdown_content = load_and_convert_document(file_path)
-    chunks = get_markdown_splits(markdown_content)
-    vector_store = setup_vector_store(chunks)
-    return vector_store, markdown_content
-
 def process_selected_file(file_path):
     """
     Processes a selected document and returns the RAG chain and markdown content.
@@ -135,6 +125,13 @@ def process_selected_file(file_path):
     Returns:
     - RAG chain and markdown content.
     """
+    @st.cache_resource(show_spinner="Processing document...")
+    def cached_processing(_file_path):
+        markdown_content = load_and_convert_document(_file_path)
+        chunks = get_markdown_splits(markdown_content)
+        vector_store = setup_vector_store(chunks)
+        return vector_store, markdown_content
+    
     vector_store, markdown_content = cached_processing(file_path)
     retriever = vector_store.as_retriever(search_type="mmr", search_kwargs={'k': 3})
     return create_rag_chain(retriever), markdown_content
@@ -143,83 +140,69 @@ def process_selected_file(file_path):
 if __name__ == "__main__":
     st.title("🧠 RCS- Chatbot")
     st.markdown("GET MORE INFO @ [RCS](https://rcs.edu.gh)")
-    col1, col2 = st.columns([3, 6])
 
-    with col1:
-        # List available PDF files
-        file_directory = 'rag-dataset/'
-        pdf_files = [f for f in os.listdir(file_directory) if f.endswith('.pdf')]
+    # List available PDF files
+    file_directory = 'rag-dataset/'
+    pdf_files = [f for f in os.listdir(file_directory) if f.endswith('.pdf')]
     
-        selected_file = st.selectbox("Select Document", [""] + pdf_files)
+    selected_file = st.selectbox("Select Document", [""] + pdf_files)
     
-        # Initialize session state
-        if 'chat_history' not in st.session_state:
-            st.session_state['chat_history'] = []
-        if 'current_file' not in st.session_state:
-            st.session_state['current_file'] = None
-        if 'enable_voice' not in st.session_state:
-            st.session_state['enable_voice'] = False
+    # Initialize session state
+    if 'chat_history' not in st.session_state:
+        st.session_state['chat_history'] = []
+    if 'current_file' not in st.session_state:
+        st.session_state['current_file'] = None
+    if 'enable_voice' not in st.session_state:
+        st.session_state['enable_voice'] = False
 
-        # Voice toggle
-        st.write("##### Voice Output")
-        st.session_state['enable_voice'] = st.checkbox("Enable Voice Output", value=st.session_state['enable_voice'])
+    # Voice toggle
+    #st.write("##### Voice Output")
+    st.session_state['enable_voice'] = st.checkbox("Enable Voice Output", value=st.session_state['enable_voice'])
 
-        # Only process file when it changes
-        if selected_file and selected_file != st.session_state.current_file:
-            st.cache_resource.clear()  # Clear the cache
-            with st.spinner("Processing document..."):
-                rag_chain, markdown_content = process_selected_file(os.path.join(file_directory, selected_file))
-                st.session_state.current_file = selected_file
-                st.session_state.rag_chain = rag_chain
-        elif not selected_file:
-            st.session_state.current_file = None
-            st.session_state.rag_chain = None
+    # Only process file when it changes
+    if selected_file and selected_file != st.session_state.current_file:
+        with st.spinner("Processing document..."):
+            rag_chain, markdown_content = process_selected_file(os.path.join(file_directory, selected_file))
+            st.session_state.current_file = selected_file
+            st.session_state.rag_chain = rag_chain
+    elif not selected_file:
+        st.session_state.current_file = None
+        st.session_state.rag_chain = None
 
-        with st.form("rag-form"):
-            text = st.text_area("Enter your question:")
-            submit = st.form_submit_button("Submit")
+    with st.form("rag-form"):
+        text = st.text_area("Enter your question:")
+        submit = st.form_submit_button("Submit")
 
-        if submit and text and st.session_state.rag_chain is not None:
-            with st.spinner("Generating response..."):
-                response = st.session_state.rag_chain.invoke(text)
-                st.session_state['chat_history'].append({"user": text, "rag_response": response})
-                
-                # Voice output if enabled
-                if st.session_state['enable_voice']:
-                    try:
-                        response_engine = pyttsx3.init()
-                        response_engine.say(response)
-                        response_engine.runAndWait()
-                    except RuntimeError as e:
-                        print(f"Voice error: {e}")
-                        if hasattr(response_engine, '_inLoop'):  # pylint: disable=protected-access
-                            response_engine.endLoop()
-                        response_engine.stop()
-                        # Retry with fresh instance
-                        response_engine = pyttsx3.init()
-                        response_engine.say(response)
-                        response_engine.runAndWait()
-                    finally:
-                        response_engine.stop()
-                        del response_engine
+    if submit and text and st.session_state.rag_chain is not None:
+        with st.spinner("Generating response..."):
+            response = st.session_state.rag_chain.invoke(text)
+            st.session_state['chat_history'].append({"user": text, "rag_response": response})
+            
+            # Voice output if enabled
+            if st.session_state['enable_voice']:
+                try:
+                    response_engine = pyttsx3.init()
+                    response_engine.say(response)
+                    response_engine.runAndWait()
+                except RuntimeError as e:
+                    print(f"Voice error: {e}")
+                    if hasattr(response_engine, '_inLoop'):  # pylint: disable=protected-access
+                        response_engine.endLoop()
+                    response_engine.stop()
+                    # Retry with fresh instance
+                    response_engine = pyttsx3.init()
+                    response_engine.say(response)
+                    response_engine.runAndWait()
+                finally:
+                    response_engine.stop()
+                    del response_engine
 
-        if selected_file:
-            st.write(f"Selected Document: {selected_file}")
+    # Display chat history
+    st.write("## Chat History")
+    for chat in reversed(st.session_state['chat_history']):
+        st.write(f"**🧑 User**: {chat['user']}")
+        st.write(f"**🧠 Assistant**: {chat['rag_response']}")
+        st.write("---")
 
-    with col2:
-        st.write("## Chat History")
-        st.markdown("""
-        <style>
-        .chat-history {
-            overflow-y: auto;
-            height: 500px; /* Adjust height as needed */
-        }
-        </style>
-        """, unsafe_allow_html=True)
-        
-        chat_container = st.container()
-        with chat_container:
-            for chat in reversed(st.session_state['chat_history']):
-                st.write(f"**🧑 User**: {chat['user']}")
-                st.write(f"**🧠 Assistant**: {chat['rag_response']}")
-                st.write("---")
+    if selected_file:
+        st.write(f"Selected Document: {selected_file}")

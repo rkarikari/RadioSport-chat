@@ -33,12 +33,12 @@ Yes, it covers the HF bands in all modes, along with the AM and FM broadcast ban
 	virtual COM port,
 	TFT color display 
 
-#### Power
+#### Power specifications
 	 	power supply:
 			7.4 V , 1,800 mAh Li-ion battery,
 
 		
-		Current consumption (A): 
+#####		Current consumption (A): 
 			Transmit - 
 				(external 13.8 V dc) 
 					1.4 A (H), 0.9 A (M), 0.6 A (L), 0.4 A (EL); 
@@ -50,7 +50,7 @@ Yes, it covers the HF bands in all modes, along with the AM and FM broadcast ban
 			Dual receiver - 
 				310 mA (rated power), 185 mA (standby), 50 mA (power save on). GPS logger on, 115 mA.
 		
-		Power consumption:
+#####		Power consumption:
     		Transmit (H/M/L/EL),
         		ext 13.8 V dc input: 
             		1.32/0.89/0.59/0.37 A (146 MHz); 
@@ -152,7 +152,7 @@ Measured in ARRL Lab
 		        0.2 µV (220 and 430 MHz).
 
 
-	Noise floor (MDS):
+#### Noise floor (MDS):
 		 for CW, 
 			1 kHz measured bandwidth, 
 					Band B:
@@ -171,7 +171,9 @@ Measured in ARRL Lab
 
 
 
-Spurious signal/harmonic suppression: ≥ 60 dB (high/medium), ≥ 50 dB (low), ≥ 40 dB (extra low).
+#### Spurious signal/harmonic suppression:
+                  ≥ 60 dB (high/medium),
+                  ≥ 50 dB (low), ≥ 40 dB (extra low).
 
 lighted keypad (see Figure 1) is very smooth, but it's not sensitive enough to interfere with normal operation. Ergonomically, I found this radio to be very well designed.
 	
