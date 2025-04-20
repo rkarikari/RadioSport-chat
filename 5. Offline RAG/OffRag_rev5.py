@@ -32,7 +32,7 @@ def embedchain_bot(db_path):
             "llm": {
                 "provider": "ollama",
                 "config": {
-                    "model": "granite3.3:2b",  # Correct vision model name
+                    "model": "gemma3:4b",  # Correct vision model name
                     "max_tokens": 1000,
                     "temperature": 0.3,
                     "stream": True,
@@ -72,10 +72,6 @@ def display_file(file):
             st.audio(file, format=mime_type)
         elif mime_type.startswith("video/"):
             st.video(file)
-        elif mime_type == "text/plain":
-            # Display the text content directly
-            text_content = file.read().decode('utf-8')
-            st.text(text_content)
     except Exception as e:
         st.error(f"Preview error: {str(e)}")
 
@@ -100,7 +96,7 @@ with st.sidebar:
 
     uploaded_file = st.file_uploader(
         "Select files",
-        type=["pdf", "png", "jpg", "jpeg", "txt"],
+        type=["pdf", "png", "jpg", "jpeg", "mp3", "wav", "mp4", "txt"],
         accept_multiple_files=False,
         key="file_uploader",
     )
@@ -149,11 +145,11 @@ with st.sidebar:
                         data_type = "video_file"
                         st.session_state.app.add(file_path, data_type=data_type)
                         st.success(f"✅ Added {uploaded_file.name}")
+
+
                     elif uploaded_file.type == "text/plain":
                         data_type = "text"
-                        # Decode the file content to a string before adding it
-                        text_content = uploaded_file.read().decode('utf-8')
-                        st.session_state.app.add(text_content, data_type=data_type)
+                        st.session_state.app.add(file_path, data_type=data_type)
                         st.success(f"✅ Added {uploaded_file.name}")
 
 

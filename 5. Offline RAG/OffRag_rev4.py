@@ -4,7 +4,6 @@ import tempfile
 import base64
 import re
 import gc
-import time
 
 import streamlit as st
 from embedchain import App
@@ -32,7 +31,7 @@ def embedchain_bot(db_path):
             "llm": {
                 "provider": "ollama",
                 "config": {
-                    "model": "granite3.3:2b",  # Correct vision model name
+                    "model": "gemma3:4b",  # Correct vision model name
                     "max_tokens": 1000,
                     "temperature": 0.3,
                     "stream": True,
@@ -72,10 +71,6 @@ def display_file(file):
             st.audio(file, format=mime_type)
         elif mime_type.startswith("video/"):
             st.video(file)
-        elif mime_type == "text/plain":
-            # Display the text content directly
-            text_content = file.read().decode('utf-8')
-            st.text(text_content)
     except Exception as e:
         st.error(f"Preview error: {str(e)}")
 
@@ -100,7 +95,7 @@ with st.sidebar:
 
     uploaded_file = st.file_uploader(
         "Select files",
-        type=["pdf", "png", "jpg", "jpeg", "txt"],
+        type=["pdf", "png", "jpg", "jpeg", "mp3", "wav", "mp4", "txt"],
         accept_multiple_files=False,
         key="file_uploader",
     )
@@ -112,6 +107,7 @@ with st.sidebar:
 
         if st.button("🚀 Add to Knowledge Base", type="primary"):
             with st.spinner("Processing..."):
+                file_path = None  # Initialize file_path outside the try block
                 try:
                     with tempfile.NamedTemporaryFile(
                         delete=False, suffix=os.path.splitext(uploaded_file.name)[1]
@@ -124,7 +120,6 @@ with st.sidebar:
                         st.session_state.app.add(file_path, data_type=data_type)
                         st.success(f"✅ Added {uploaded_file.name}")
 
-
                     elif uploaded_file.type.startswith("image/"):
                         try:
                             img = Image.open(file_path)
@@ -134,41 +129,32 @@ with st.sidebar:
                             else:
                                 st.session_state.app.add(ocr_text, data_type="text")
                                 st.success(f"✅ Added {uploaded_file.name} (via OCR text)")
-
                         except Exception as e:
                             st.error(f"OCR Error: {str(e)}")
-
 
                     elif uploaded_file.type.startswith("audio/"):
                         data_type = "audio_file"
                         st.session_state.app.add(file_path, data_type=data_type)
                         st.success(f"✅ Added {uploaded_file.name}")
 
-
                     elif uploaded_file.type.startswith("video/"):
                         data_type = "video_file"
                         st.session_state.app.add(file_path, data_type=data_type)
                         st.success(f"✅ Added {uploaded_file.name}")
+
                     elif uploaded_file.type == "text/plain":
                         data_type = "text"
-                        # Decode the file content to a string before adding it
-                        text_content = uploaded_file.read().decode('utf-8')
-                        st.session_state.app.add(text_content, data_type=data_type)
+                        st.session_state.app.add(file_path, data_type=data_type)
                         st.success(f"✅ Added {uploaded_file.name}")
-
 
                     else:
                         st.error(f"Unsupported file type: {uploaded_file.type}")
 
-
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
                 finally:
-                     if 'file_path' in locals() and file_path:
-                        try:
-                            os.remove(file_path)
-                        except Exception as e:
-                            st.error(f"Error deleting temporary file: {e}")
+                    if file_path:
+                        os.remove(file_path)
 
         st.divider()
         st.subheader("📄 File Preview")
@@ -203,17 +189,9 @@ with col2:
         st.cache_data.clear()
         st.cache_resource.clear()
 
-        # Attempt to close ChromaDB client and wait before deleting the directory
-        try:
-            if hasattr(st.session_state, 'app') and hasattr(st.session_state.app, 'db') and hasattr(st.session_state.app.db, 'client'):
-                st.session_state.app.db.client.close()
-                time.sleep(2)  # Wait for 2 seconds
-        except Exception as e:
-            st.error(f"Error closing ChromaDB client: {e}")
-
         try:
             if db_dir:
-                shutil.rmtree(db_dir, ignore_errors=True)
+                shutil.rmtree(db_dir)
         except Exception as e:
             st.error(f"Error deleting vector DB directory: {e}")
 
