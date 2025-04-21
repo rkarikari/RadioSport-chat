@@ -14,6 +14,8 @@ from streamlit_chat import message
 from PIL import Image
 import pytesseract
 from io import BytesIO
+import numpy as np  # Import numpy
+
 
 # === IMPORTANT ===
 # If Tesseract is NOT in your system PATH, uncomment and update the line below:
@@ -53,6 +55,38 @@ class DebugApp(App):
             },
         }
 
+    @property
+    def embedder(self):
+        """Access the embedder, initializing it if needed."""
+        if hasattr(self, '_embedder'):
+            return self._embedder
+
+        try:
+            if hasattr(self, 'db') and hasattr(self.db, 'embedder'):
+                self._embedder = self.db.embedder
+                logger.info("Using embedder from self.db.embedder")
+            elif hasattr(self, 'config') and isinstance(self.config, dict) and 'embedder' in self.config:
+                from embedchain.embedder.ollama import OllamaEmbedder
+                embedder_config = self.config['embedder'].get('config', {})
+                self._embedder = OllamaEmbedder(**embedder_config)
+                logger.info("Created embedder from config")
+            else:
+                from embedchain.embedder.ollama import OllamaEmbedder
+                self._embedder = OllamaEmbedder(
+                    model="nomic-embed-text:latest",
+                    base_url="http://localhost:11434"
+                )
+                logger.info("Created default embedder")
+
+            return self._embedder
+        except Exception as e:
+            logger.error(f"Failed to get/create embedder: {str(e)}")
+            raise
+
+    @embedder.setter
+    def embedder(self, value):
+        self._embedder = value
+
     def add(self, *args, **kwargs):
         start_time = time.time()
         data_type = kwargs.get("data_type", "unknown")
@@ -87,23 +121,30 @@ class DebugApp(App):
         duration = time.time() - start_time
         logger.info(f"Chat response generated in {duration:.2f}s")
 
-        # If you want to capture retrieved docs, check if response or other attributes expose them.
-        # Otherwise, leave retrieved_docs empty or implement alternative retrieval logging.
-
         return response
 
     def test_embedding(self, text):
         try:
             start_time = time.time()
-            embedding = self.embedder.embed_query(text)
+            embeddings = self.embedder.to_embeddings([text])  # Corrected method
+
+            # Check if embeddings is a list and handle accordingly
+            if isinstance(embeddings, list):
+                embedding = embeddings[0]  # Access the first element
+            elif isinstance(embeddings, np.ndarray):
+                embedding = embeddings # It's already the embedding
+            else:
+                raise TypeError(f"Unexpected embedding type: {type(embeddings)}")
+
             duration = time.time() - start_time
             return {
                 "success": True,
                 "embedding_dimension": len(embedding),
-                "embedding_sample": embedding[:5],
+                "embedding_sample": embedding[:5].tolist(),
                 "duration": duration,
             }
         except Exception as e:
+            logger.error(f"Embedding error: {str(e)}")
             return {"success": False, "error": str(e)}
 
     def get_debug_info(self):
@@ -111,13 +152,12 @@ class DebugApp(App):
 
 
 def embedchain_bot(db_path):
-    # Use DebugApp instead of App for enhanced debugging
     return DebugApp.from_config(
         config={
             "llm": {
                 "provider": "ollama",
                 "config": {
-                    "model": "granite3.3:2b",  # Correct vision model name
+                    "model": "granite3.3:2b",
                     "max_tokens": 1000,
                     "temperature": 0.3,
                     "stream": True,
@@ -180,14 +220,12 @@ if "messages" not in st.session_state:
 if "last_uploaded_image" not in st.session_state:
     st.session_state.last_uploaded_image = None
 
-# Debug mode toggle
 if "debug_mode" not in st.session_state:
     st.session_state.debug_mode = False
 
 with st.sidebar:
     st.title("🗂️ File Management")
     st.header("Upload Your Files")
-
     uploaded_file = st.file_uploader(
         "Select files",
         type=["pdf", "png", "jpg", "jpeg", "txt"],
@@ -212,7 +250,6 @@ with st.sidebar:
                         data_type = "pdf_file"
                         st.session_state.app.add(file_path, data_type=data_type)
                         st.success(f"✅ Added {uploaded_file.name}")
-
                     elif uploaded_file.type.startswith("image/"):
                         try:
                             img = Image.open(file_path)
@@ -224,12 +261,10 @@ with st.sidebar:
                                 st.success(f"✅ Added {uploaded_file.name} (via OCR text)")
                         except Exception as e:
                             st.error(f"OCR Error: {str(e)}")
-
                     elif uploaded_file.type.startswith("audio/"):
                         data_type = "audio_file"
                         st.session_state.app.add(file_path, data_type=data_type)
                         st.success(f"✅ Added {uploaded_file.name}")
-
                     elif uploaded_file.type.startswith("video/"):
                         data_type = "video_file"
                         st.session_state.app.add(file_path, data_type=data_type)
@@ -243,7 +278,6 @@ with st.sidebar:
 
                     else:
                         st.error(f"Unsupported file type: {uploaded_file.type}")
-
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
                 finally:
@@ -286,7 +320,7 @@ with col2:
             db_dir = st.session_state.db_dir
             del st.session_state.db_dir
 
-        gc.collect()  # Force garbage collection to close file handles
+        gc.collect()
 
         st.cache_data.clear()
         st.cache_resource.clear()
@@ -325,7 +359,6 @@ if prompt:
                     img_path = tmp_img.name
 
                 response = st.session_state.app.chat(prompt, image=img_path)
-
                 os.remove(img_path)
             else:
                 response = st.session_state.app.chat(prompt)
@@ -336,7 +369,6 @@ if prompt:
         except Exception as e:
             st.error(f"Response error: {str(e)}")
 
-# --- Display Debug Information if Debug Mode is Enabled ---
 if st.session_state.debug_mode:
     st.divider()
     st.subheader("🔍 RAG Pipeline Debug Information")
@@ -380,19 +412,15 @@ if st.session_state.debug_mode:
                     logger.info(f"Current DB document count: {count}")
                 except Exception as e:
                     st.warning(f"Could not retrieve DB stats: {str(e)}")
-                    logger.warning(f"Error getting DB stats: {str(e)}")
             else:
                 st.write("No DB instance found.")
         except Exception as e:
             st.error(f"Error accessing vector DB: {str(e)}")
-            logger.error(f"Error accessing vector DB: {str(e)}")
 
-
-# --- Optional: Add a sidebar section for component testing ---
 with st.sidebar.expander("🧪 RAG Component Testing", expanded=False):
     st.write("Test individual RAG components for troubleshooting.")
 
-    test_text = st.text_area("Enter text to test embedding:", value="This is a test of the embedding model.")
+    test_text = st.text_area("Enter text to test embedding:", value="The whole Duty of man..\r Fear God, keep his commands.")
     if st.button("Test Embedding", key="test_embed_btn"):
         with st.spinner("Testing embedding..."):
             try:
