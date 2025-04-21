@@ -5,8 +5,6 @@ import base64
 import re
 import gc
 import time
-import logging
-from datetime import datetime
 
 import streamlit as st
 from embedchain import App
@@ -28,91 +26,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Setup logging for debugging and troubleshooting
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger("rag_assistant")
-
-
-# --- Custom Debuggable App Class to track RAG pipeline operations ---
-class DebugApp(App):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.debug_info = {
-            "add_operations": [],
-            "query_operations": [],
-            "current_session": {
-                "chunks": [],
-                "embeddings": [],
-                "retrieved_docs": [],
-                "contexts": [],
-                "prompt": "",
-                "response": "",
-            },
-        }
-
-    def add(self, *args, **kwargs):
-        start_time = time.time()
-        data_type = kwargs.get("data_type", "unknown")
-        text_snippet = str(args[0])[:100] + "..." if args else "No text"
-        logger.info(f"Adding document (type={data_type}): snippet='{text_snippet}'")
-
-        result = super().add(*args, **kwargs)
-
-        operation_info = {
-            "timestamp": datetime.now().isoformat(),
-            "data_type": data_type,
-            "text_snippet": text_snippet,
-            "duration": time.time() - start_time,
-            "success": result is not None,
-        }
-        self.debug_info["add_operations"].append(operation_info)
-        logger.info(f"Add operation completed: {operation_info}")
-        return result
-
-    def chat(self, prompt, **kwargs):
-        self.debug_info["current_session"] = {
-            "prompt": prompt,
-            "response": "",
-            "retrieved_docs": [],
-        }
-        start_time = time.time()
-        logger.info(f"Processing chat query: '{prompt[:50]}...'")
-
-        response = super().chat(prompt, **kwargs)
-
-        self.debug_info["current_session"]["response"] = response
-        duration = time.time() - start_time
-        logger.info(f"Chat response generated in {duration:.2f}s")
-
-        # If you want to capture retrieved docs, check if response or other attributes expose them.
-        # Otherwise, leave retrieved_docs empty or implement alternative retrieval logging.
-
-        return response
-
-    def test_embedding(self, text):
-        try:
-            start_time = time.time()
-            embedding = self.embedder.embed_query(text)
-            duration = time.time() - start_time
-            return {
-                "success": True,
-                "embedding_dimension": len(embedding),
-                "embedding_sample": embedding[:5],
-                "duration": duration,
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def get_debug_info(self):
-        return self.debug_info
-
-
 def embedchain_bot(db_path):
-    # Use DebugApp instead of App for enhanced debugging
-    return DebugApp.from_config(
+    return App.from_config(
         config={
             "llm": {
                 "provider": "ollama",
@@ -138,7 +53,6 @@ def embedchain_bot(db_path):
         }
     )
 
-
 def display_file(file):
     if file is None:
         return
@@ -159,17 +73,16 @@ def display_file(file):
         elif mime_type.startswith("video/"):
             st.video(file)
         elif mime_type == "text/plain":
-            text_content = file.read().decode("utf-8")
+            # Display the text content directly
+            text_content = file.read().decode('utf-8')
             st.text(text_content)
     except Exception as e:
         st.error(f"Preview error: {str(e)}")
 
-
-@st.cache_resource(show_spinner=False)
+@st.cache_resource
 def get_app():
     db_dir = tempfile.mkdtemp()
     return embedchain_bot(db_dir), db_dir
-
 
 if "app" not in st.session_state or "db_dir" not in st.session_state:
     st.session_state.app, st.session_state.db_dir = get_app()
@@ -177,12 +90,9 @@ if "app" not in st.session_state or "db_dir" not in st.session_state:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Store last uploaded image for multimodal querying
 if "last_uploaded_image" not in st.session_state:
     st.session_state.last_uploaded_image = None
-
-# Debug mode toggle
-if "debug_mode" not in st.session_state:
-    st.session_state.debug_mode = False
 
 with st.sidebar:
     st.title("🗂️ File Management")
@@ -196,6 +106,7 @@ with st.sidebar:
     )
 
     if uploaded_file:
+        # Save last uploaded image for vision queries
         if uploaded_file.type.startswith("image/"):
             st.session_state.last_uploaded_image = uploaded_file
 
@@ -213,6 +124,7 @@ with st.sidebar:
                         st.session_state.app.add(file_path, data_type=data_type)
                         st.success(f"✅ Added {uploaded_file.name}")
 
+
                     elif uploaded_file.type.startswith("image/"):
                         try:
                             img = Image.open(file_path)
@@ -222,32 +134,37 @@ with st.sidebar:
                             else:
                                 st.session_state.app.add(ocr_text, data_type="text")
                                 st.success(f"✅ Added {uploaded_file.name} (via OCR text)")
+
                         except Exception as e:
                             st.error(f"OCR Error: {str(e)}")
+
 
                     elif uploaded_file.type.startswith("audio/"):
                         data_type = "audio_file"
                         st.session_state.app.add(file_path, data_type=data_type)
                         st.success(f"✅ Added {uploaded_file.name}")
 
+
                     elif uploaded_file.type.startswith("video/"):
                         data_type = "video_file"
                         st.session_state.app.add(file_path, data_type=data_type)
                         st.success(f"✅ Added {uploaded_file.name}")
-
                     elif uploaded_file.type == "text/plain":
                         data_type = "text"
-                        text_content = uploaded_file.read().decode("utf-8")
+                        # Decode the file content to a string before adding it
+                        text_content = uploaded_file.read().decode('utf-8')
                         st.session_state.app.add(text_content, data_type=data_type)
                         st.success(f"✅ Added {uploaded_file.name}")
+
 
                     else:
                         st.error(f"Unsupported file type: {uploaded_file.type}")
 
+
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
                 finally:
-                    if "file_path" in locals() and file_path:
+                     if 'file_path' in locals() and file_path:
                         try:
                             os.remove(file_path)
                         except Exception as e:
@@ -256,11 +173,6 @@ with st.sidebar:
         st.divider()
         st.subheader("📄 File Preview")
         display_file(uploaded_file)
-
-    st.divider()
-    st.checkbox(
-        "🐞 Enable Debug Mode", value=st.session_state.debug_mode, key="debug_mode"
-    )
 
 st.title("🌐 Multimodal Chat Assistant")
 st.caption("Chat with documents, images, audio, and video using gemma3:4b vision model")
@@ -291,10 +203,11 @@ with col2:
         st.cache_data.clear()
         st.cache_resource.clear()
 
+        # Attempt to close ChromaDB client and wait before deleting the directory
         try:
             if hasattr(st.session_state, 'app') and hasattr(st.session_state.app, 'db') and hasattr(st.session_state.app.db, 'client'):
                 st.session_state.app.db.client.close()
-                time.sleep(2)
+                time.sleep(2)  # Wait for 2 seconds
         except Exception as e:
             st.error(f"Error closing ChromaDB client: {e}")
 
@@ -316,16 +229,18 @@ if prompt:
 
     with st.spinner("🔍 Analyzing..."):
         try:
+            # If an image was uploaded, pass it along for multimodal query
             if st.session_state.last_uploaded_image is not None:
                 img_file = st.session_state.last_uploaded_image
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=os.path.splitext(img_file.name)[1]
-                ) as tmp_img:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(img_file.name)[1]) as tmp_img:
                     tmp_img.write(img_file.getvalue())
                     img_path = tmp_img.name
 
-                response = st.session_state.app.chat(prompt, image=img_path)
-
+                # Pass image path with prompt to the vision model
+                response = st.session_state.app.chat(
+                    prompt,
+                    image=img_path  # Adjust this param if Embedchain API differs
+                )
                 os.remove(img_path)
             else:
                 response = st.session_state.app.chat(prompt)
@@ -335,73 +250,3 @@ if prompt:
             message(filtered_response)
         except Exception as e:
             st.error(f"Response error: {str(e)}")
-
-# --- Display Debug Information if Debug Mode is Enabled ---
-if st.session_state.debug_mode:
-    st.divider()
-    st.subheader("🔍 RAG Pipeline Debug Information")
-
-    debug_info = st.session_state.app.get_debug_info()
-
-    debug_tab1, debug_tab2, debug_tab3 = st.tabs(
-        ["Current Query", "Add Operations", "DB Stats"]
-    )
-
-    with debug_tab1:
-        current_session = debug_info["current_session"]
-        st.write("**Last Query Prompt:**")
-        st.write(current_session["prompt"])
-
-        st.write("**Retrieved Documents:**")
-        st.write("Not available due to Embedchain API limitations.")
-
-        st.write("**Response:**")
-        st.write(current_session["response"])
-
-    with debug_tab2:
-        st.write("**Document Add Operations:**")
-        if debug_info["add_operations"]:
-            for op in debug_info["add_operations"]:
-                st.write(
-                    f"- [{op['timestamp']}] Type: {op['data_type']}, "
-                    f"Success: {op['success']}, Duration: {op['duration']:.2f}s, "
-                    f"Snippet: {op['text_snippet']}"
-                )
-        else:
-            st.write("No add operations recorded.")
-
-    with debug_tab3:
-        st.write("**Vector DB Stats:**")
-        try:
-            if hasattr(st.session_state.app, "db"):
-                try:
-                    count = st.session_state.app.db.count()
-                    st.write(f"📈 Documents in DB: {count}")
-                    logger.info(f"Current DB document count: {count}")
-                except Exception as e:
-                    st.warning(f"Could not retrieve DB stats: {str(e)}")
-                    logger.warning(f"Error getting DB stats: {str(e)}")
-            else:
-                st.write("No DB instance found.")
-        except Exception as e:
-            st.error(f"Error accessing vector DB: {str(e)}")
-            logger.error(f"Error accessing vector DB: {str(e)}")
-
-
-# --- Optional: Add a sidebar section for component testing ---
-with st.sidebar.expander("🧪 RAG Component Testing", expanded=False):
-    st.write("Test individual RAG components for troubleshooting.")
-
-    test_text = st.text_area("Enter text to test embedding:", value="This is a test of the embedding model.")
-    if st.button("Test Embedding", key="test_embed_btn"):
-        with st.spinner("Testing embedding..."):
-            try:
-                result = st.session_state.app.test_embedding(test_text)
-                if result["success"]:
-                    st.success(f"✅ Embedding successful - Dimension: {result['embedding_dimension']}")
-                    st.write("Sample of embedding vector:", result["embedding_sample"])
-                    st.write(f"Process took {result['duration']:.4f} seconds")
-                else:
-                    st.error(f"❌ Embedding failed: {result['error']}")
-            except Exception as e:
-                st.error(f"Test failed with error: {str(e)}")
