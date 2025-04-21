@@ -442,7 +442,7 @@ if st.session_state.debug_mode:
 with st.sidebar.expander("🧪 RAG Component Testing", expanded=False):
     st.write("Test individual RAG components for troubleshooting.")
 
-    test_text = st.text_area("Enter text to test embedding:", value="The whole Duty of man..\r Fear God, keep his commands.")
+    test_text = st.text_area("Enter text to test embedding:", value="This is a test of the embedding model.")
     if st.button("Test Embedding", key="test_embed_btn"):
         with st.spinner("Testing embedding..."):
             try:
