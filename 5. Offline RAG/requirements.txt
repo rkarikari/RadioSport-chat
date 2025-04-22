@@ -3,3 +3,4 @@ embedchain
 streamlit-chat
 pillow
 pytesseract
+pdfplumber

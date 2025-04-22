@@ -14,9 +14,9 @@ from streamlit_chat import message
 from PIL import Image
 import pytesseract
 from io import BytesIO
-import numpy as np  # Import numpy
-
-
+import numpy as np
+import concurrent.futures
+import pdfplumber
 
 # === IMPORTANT ===
 # If Tesseract is NOT in your system PATH, uncomment and update the line below:
@@ -37,7 +37,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("rag_assistant")
-
 
 # --- Custom Debuggable App Class to track RAG pipeline operations ---
 class DebugApp(App):
@@ -91,21 +90,38 @@ class DebugApp(App):
     def add(self, *args, **kwargs):
         start_time = time.time()
         data_type = kwargs.get("data_type", "unknown")
-        text_snippet = str(args[0])[:100] + "..." if args else "No text"
+        text_snippet = str(args[0])[:100] + "..." if args and args[0] else "No text"
         logger.info(f"Adding document (type={data_type}): snippet='{text_snippet}'")
 
-        result = super().add(args[0], **kwargs)
-
-        operation_info = {
-            "timestamp": datetime.now().isoformat(),
-            "data_type": data_type,
-            "text_snippet": text_snippet,
-            "duration": time.time() - start_time,
-            "success": result is not None,
-        }
-        self.debug_info["add_operations"].append(operation_info)
-        logger.info(f"Add operation completed: {operation_info}")
-        return result
+        try:
+            if not args or not args[0].strip():
+                raise ValueError("Empty text provided to embed")
+            result = super().add(args[0], **kwargs)
+            if result is None:
+                raise ValueError("Embedding result is None")
+        except Exception as e:
+            logger.error(f"Error in add method: {e}")
+            operation_info = {
+                "timestamp": datetime.now().isoformat(),
+                "data_type": data_type,
+                "text_snippet": text_snippet,
+                "duration": time.time() - start_time,
+                "success": False,
+                "error": str(e),
+            }
+            self.debug_info["add_operations"].append(operation_info)
+            raise
+        else:
+            operation_info = {
+                "timestamp": datetime.now().isoformat(),
+                "data_type": data_type,
+                "text_snippet": text_snippet,
+                "duration": time.time() - start_time,
+                "success": True,
+            }
+            self.debug_info["add_operations"].append(operation_info)
+            logger.info(f"Add operation completed: {operation_info}")
+            return result
 
     def chat(self, prompt, **kwargs):
         self.debug_info["current_session"] = {
@@ -130,19 +146,18 @@ class DebugApp(App):
     def test_embedding(self, text):
         try:
             start_time = time.time()
-            embeddings = self.embedder.to_embeddings([text])  # Corrected method
+            embeddings = self.embedder.to_embeddings([text])
 
             if isinstance(embeddings, list):
-                embedding = embeddings[0]  # Access the first element
+                embedding = embeddings[0]
             elif isinstance(embeddings, np.ndarray):
-                embedding = embeddings  # It's already the embedding
+                embedding = embeddings
             else:
                 raise TypeError(f"Unexpected embedding type: {type(embeddings)}")
 
             if isinstance(embedding, np.float32):
                 raise TypeError("Embedding is a single float value, not a sequence.")
 
-            # Add the test embedding to the database
             self.add(text, data_type="text")
 
             duration = time.time() - start_time
@@ -159,34 +174,39 @@ class DebugApp(App):
     def get_debug_info(self):
         return self.debug_info
 
-
 def embedchain_bot(db_path):
-    return DebugApp.from_config(
-        config={
-            "llm": {
-                "provider": "ollama",
-                "config": {
-                    "model": "granite3.3:2b",
-                    "max_tokens": 1000,
-                    "temperature": 0.3,
-                    "stream": True,
-                    "base_url": "http://localhost:11434",
+    try:
+        logger.info(f"Creating DebugApp with db_path: {db_path}")
+        app = DebugApp.from_config(
+            config={
+                "llm": {
+                    "provider": "ollama",
+                    "config": {
+                        "model": "granite3.3:2b",
+                        "max_tokens": 1000,
+                        "temperature": 0.3,
+                        "stream": True,
+                        "base_url": "http://localhost:11434",
+                    },
                 },
-            },
-            "vectordb": {
-                "provider": "chroma",
-                "config": {"dir": db_path},
-            },
-            "embedder": {
-                "provider": "ollama",
-                "config": {
-                    "model": "nomic-embed-text:latest",
-                    "base_url": "http://localhost:11434",
+                "vectordb": {
+                    "provider": "chroma",
+                    "config": {"dir": db_path},
                 },
-            },
-        }
-    )
-
+                "embedder": {
+                    "provider": "ollama",
+                    "config": {
+                        "model": "nomic-embed-text:latest",
+                        "base_url": "http://localhost:11434",
+                    },
+                },
+            }
+        )
+        logger.info("DebugApp created successfully")
+        return app
+    except Exception as e:
+        logger.error(f"Failed to create DebugApp: {str(e)}")
+        raise
 
 def display_file(file):
     if file is None:
@@ -197,7 +217,7 @@ def display_file(file):
         if mime_type == "application/pdf":
             base64_pdf = base64.b64encode(file.read()).decode("utf-8")
             st.markdown(
-                f'<iframe src="data:application/pdf;base64,{base_pdf}" '
+                f'<iframe src="data:application/pdf;base64,{base64_pdf}" '
                 'width="100%" height="600px" frameborder="0" allowfullscreen></iframe>',
                 unsafe_allow_html=True,
             )
@@ -213,16 +233,44 @@ def display_file(file):
     except Exception as e:
         st.error(f"Preview error: {str(e)}")
 
+def get_app(db_path):
+    try:
+        logger.info(f"Creating app with db_path: {db_path}")
+        app = embedchain_bot(db_path=db_path)
+        return app
+    except Exception as e:
+        logger.error(f"Failed to create app in get_app: {str(e)}")
+        raise
 
-@st.cache_resource(show_spinner=False)
-def get_app():
-    db_dir = tempfile.mkdtemp()
-    return embedchain_bot(db_dir), db_dir
+# Initialize app and db_dir at the start
+def initialize_app():
+    try:
+        logger.info("Attempting to initialize app")
+        # Check if app is already initialized and valid
+        if hasattr(st.session_state, 'app') and hasattr(st.session_state.app, 'db'):
+            try:
+                # Test DB access to ensure it's valid
+                st.session_state.app.db.count()
+                logger.info("App already initialized and valid, skipping initialization")
+                return
+            except Exception as e:
+                logger.warning(f"Existing app is invalid: {str(e)}, reinitializing")
 
+        # Use a fixed DB path to persist data
+        db_path = "./chroma_db"
+        os.makedirs(db_path, exist_ok=True)
+        st.session_state.db_dir = db_path
+        st.session_state.app = get_app(db_path)
+        logger.info("Successfully initialized st.session_state.app and st.session_state.db_dir")
+    except Exception as e:
+        st.error(f"Failed to initialize app: {str(e)}")
+        logger.error(f"App initialization error: {str(e)}")
+        raise
 
-if "app" not in st.session_state or "db_dir" not in st.session_state:
-    st.session_state.app, st.session_state.db_dir = get_app()
+# Run initialization immediately
+initialize_app()
 
+# Initialize session state defaults
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -235,70 +283,133 @@ if "debug_mode" not in st.session_state:
 with st.sidebar:
     st.title("🗂️ File Management")
     st.header("Upload Your Files")
-    uploaded_file = st.file_uploader(
+    uploaded_files = st.file_uploader(
         "Select files",
         type=["pdf", "png", "jpg", "jpeg", "txt"],
-        accept_multiple_files=False,
+        accept_multiple_files=True,
         key="file_uploader",
     )
 
-    if uploaded_file:
-        if uploaded_file.type.startswith("image/"):
-            st.session_state.last_uploaded_image = uploaded_file
+    if uploaded_files:
+        if any(f.type.startswith("image/") for f in uploaded_files):
+            st.session_state.last_uploaded_image = next(
+                (f for f in reversed(uploaded_files) if f.type.startswith("image/")), None
+            )
 
         if st.button("🚀 Add to Knowledge Base", type="primary"):
-            with st.spinner("Processing..."):
-                try:
-                    with tempfile.NamedTemporaryFile(
-                        delete=False, suffix=os.path.splitext(uploaded_file.name)[1]
-                    ) as f:
-                        f.write(uploaded_file.getvalue())
-                        file_path = f.name
+            with st.spinner("Processing files..."):
+                # Ensure app is initialized
+                if not hasattr(st.session_state, 'app'):
+                    try:
+                        logger.warning("st.session_state.app missing before file processing, reinitializing")
+                        initialize_app()
+                        logger.info("Reinitialized st.session_state.app for file processing")
+                    except Exception as e:
+                        st.error(f"Failed to reinitialize app for file processing: {str(e)}")
+                        logger.error(f"App reinitialization error: {str(e)}")
+                        st.stop()
 
-                    if uploaded_file.type == "application/pdf":
-                        data_type = "pdf_file"
-                        st.session_state.app.add(file_path, data_type=data_type)
-                        st.success(f"✅ Added {uploaded_file.name}")
-                    elif uploaded_file.type.startswith("image/"):
-                        try:
+                def add_file(file, app):
+                    messages = []  # Collect messages for main thread
+                    errors = []  # Collect errors for main thread
+                    try:
+                        with tempfile.NamedTemporaryFile(
+                            delete=False, suffix=os.path.splitext(file.name)[1]
+                        ) as f:
+                            f.write(file.getvalue())
+                            file_path = f.name
+
+                        if file.type == "application/pdf":
+                            with pdfplumber.open(file_path) as pdf:
+                                pages_text = [page.extract_text() for page in pdf.pages if page.extract_text()]
+                            if not pages_text:
+                                errors.append(f"No text extracted from {file.name}")
+                                logger.warning(f"No text extracted from PDF: {file.name}")
+                                return messages, errors
+                            messages.append(f"Extracted text from {len(pages_text)} pages in {file.name}")
+                            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                                futures = [
+                                    executor.submit(app.add, text, data_type="text")
+                                    for text in pages_text if text.strip()
+                                ]
+                                for future in concurrent.futures.as_completed(futures):
+                                    try:
+                                        future.result()
+                                    except Exception as e:
+                                        errors.append(f"Error adding PDF page: {e}")
+                                        logger.error(f"ThreadPoolExecutor error (PDF): {e}")
+                        elif file.type.startswith("image/"):
                             img = Image.open(file_path)
                             ocr_text = pytesseract.image_to_string(img).strip()
                             if not ocr_text:
-                                st.error("OCR did not extract any text from the image.")
-                            else:
-                                st.session_state.app.add(ocr_text, data_type="text")
-                                st.success(f"✅ Added {uploaded_file.name} (via OCR text)")
-                        except Exception as e:
-                            st.error(f"OCR Error: {str(e)}")
-                    elif uploaded_file.type.startswith("audio/"):
-                        data_type = "audio_file"
-                        st.session_state.app.add(file_path, data_type=data_type)
-                        st.success(f"✅ Added {uploaded_file.name}")
-                    elif uploaded_file.type.startswith("video/"):
-                        data_type = "video_file"
-                        st.session_state.app.add(file_path, data_type=data_type)
-                        st.success(f"✅ Added {uploaded_file.name}")
+                                errors.append(f"No text extracted from {file.name}")
+                                logger.warning(f"No OCR text extracted from image: {file.name}")
+                                return messages, errors
+                            messages.append(f"Extracted OCR text from {file.name}")
+                            app.add(ocr_text, data_type="text")
+                        elif file.type == "text/plain":
+                            text_content = file.read().decode("utf-8")
+                            if not text_content.strip():
+                                errors.append(f"Empty text file: {file.name}")
+                                logger.warning(f"Empty text file: {file.name}")
+                                return messages, errors
+                            chunk_size = 1000
+                            chunks = [text_content[i:i + chunk_size] for i in range(0, len(text_content), chunk_size)]
+                            messages.append(f"Split {file.name} into {len(chunks)} chunks")
+                            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                                futures = [
+                                    executor.submit(app.add, chunk, data_type="text")
+                                    for chunk in chunks if chunk.strip()
+                                ]
+                                for future in concurrent.futures.as_completed(futures):
+                                    try:
+                                        future.result()
+                                    except Exception as e:
+                                        errors.append(f"Error adding text chunk: {e}")
+                                        logger.error(f"ThreadPoolExecutor error (text): {e}")
+                        else:
+                            errors.append(f"Unsupported file type: {file.type}")
+                            logger.warning(f"Unsupported file type: {file.type}")
+                    except Exception as e:
+                        errors.append(f"Error processing {file.name}: {str(e)}")
+                        logger.error(f"File processing error: {e}")
+                    finally:
+                        if 'file_path' in locals():
+                            try:
+                                os.remove(file_path)
+                            except Exception as e:
+                                errors.append(f"Error deleting temporary file: {e}")
+                                logger.error(f"Temp file deletion error: {e}")
+                    return messages, errors
 
-                    elif uploaded_file.type == "text/plain":
-                        data_type = "text"
-                        text_content = uploaded_file.read().decode("utf-8")
-                        st.session_state.app.add(text_content, data_type=data_type)
-                        st.success(f"✅ Added {uploaded_file.name}")
-
-                    else:
-                        st.error(f"Unsupported file type: {uploaded_file.type}")
-                except Exception as e:
-                    st.error(f"Error: {str(e)}")
-                finally:
-                    if "file_path" in locals() and file_path:
+                # Process files and collect messages/errors
+                all_messages = []
+                all_errors = []
+                with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                    futures = [executor.submit(add_file, file, st.session_state.app) for file in uploaded_files]
+                    for future in concurrent.futures.as_completed(futures):
                         try:
-                            os.remove(file_path)
+                            messages, errors = future.result()
+                            all_messages.extend(messages)
+                            all_errors.extend(errors)
                         except Exception as e:
-                            st.error(f"Error deleting temporary file: {e}")
+                            all_errors.append(f"Thread execution error: {str(e)}")
+                            logger.error(f"Thread execution error: {e}")
+
+                # Display messages and errors in the main thread
+                for msg in all_messages:
+                    st.write(msg)
+                for err in all_errors:
+                    st.error(err)
+
+                if not all_errors:
+                    st.success("✅ All files processed successfully")
+                else:
+                    st.warning("Some files processed with errors. Check logs for details.")
 
         st.divider()
         st.subheader("📄 File Preview")
-        display_file(uploaded_file)
+        display_file(uploaded_files[0] if uploaded_files else None)
 
     st.divider()
     st.checkbox(
@@ -321,34 +432,39 @@ with col1:
 with col2:
     if st.button("🗑️ Flush RAG Cache"):
         st.session_state.messages = []
-
         db_dir = None
         if "app" in st.session_state:
+            try:
+                if hasattr(st.session_state.app, 'db') and hasattr(st.session_state.app.db, 'client'):
+                    st.session_state.app.db.client.close()
+                    time.sleep(2)
+            except Exception as e:
+                st.error(f"Error closing ChromaDB client: {e}")
             del st.session_state.app
         if "db_dir" in st.session_state:
             db_dir = st.session_state.db_dir
             del st.session_state.db_dir
 
         gc.collect()
-
         st.cache_data.clear()
         st.cache_resource.clear()
 
         try:
-            if hasattr(st.session_state, 'app') and hasattr(st.session_state.app, 'db') and hasattr(st.session_state.app.db, 'client'):
-                st.session_state.app.db.client.close()
-                time.sleep(2)
-        except Exception as e:
-            st.error(f"Error closing ChromaDB client: {e}")
-
-        try:
             if db_dir:
                 shutil.rmtree(db_dir, ignore_errors=True)
+                logger.info(f"Deleted DB directory: {db_dir}")
         except Exception as e:
             st.error(f"Error deleting vector DB directory: {e}")
 
-        st.session_state.app, st.session_state.db_dir = get_app()
-        st.success("RAG cache and chat history have been flushed.")
+        # Reinitialize app and db_dir
+        try:
+            initialize_app()
+            st.success("RAG cache and chat history have been flushed.")
+            logger.info("Reinitialized st.session_state.app and st.session_state.db_dir after cache flush")
+        except Exception as e:
+            st.error(f"Failed to reinitialize app: {str(e)}")
+            logger.error(f"App reinitialization error: {str(e)}")
+            st.stop()
         st.rerun()
 
 prompt = st.chat_input("Ask about your files or images...")
@@ -359,53 +475,64 @@ if prompt:
 
     with st.spinner("🔍 Analyzing..."):
         try:
-            if st.session_state.last_uploaded_image is not None:
-                img_file = st.session_state.last_uploaded_image
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=os.path.splitext(img_file.name)[1]
-                ) as tmp_img:
-                    tmp_img.write(img_file.getvalue())
-                    img_path = tmp_img.name
-
-                response = st.session_state.app.chat(prompt, image=img_path)
-                os.remove(img_path)
+            if not hasattr(st.session_state, 'app'):
+                st.error("st.session_state.app is not initialized. Please restart the app.")
+                logger.error("st.session_state.app is not initialized for chat")
             else:
-                response = st.session_state.app.chat(prompt)
+                if st.session_state.last_uploaded_image is not None:
+                    img_file = st.session_state.last_uploaded_image
+                    with tempfile.NamedTemporaryFile(
+                        delete=False, suffix=os.path.splitext(img_file.name)[1]
+                    ) as tmp_img:
+                        tmp_img.write(img_file.getvalue())
+                        img_path = tmp_img.name
 
-            filtered_response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
-            st.session_state.messages.append({"role": "assistant", "content": filtered_response})
-            message(filtered_response)
+                    response = st.session_state.app.chat(prompt, image=img_path)
+                    os.remove(img_path)
+                else:
+                    response = st.session_state.app.chat(prompt)
+
+                filtered_response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
+                st.session_state.messages.append({"role": "assistant", "content": filtered_response})
+                message(filtered_response)
         except Exception as e:
             st.error(f"Response error: {str(e)}")
+
+@st.cache_data(show_spinner=False)
+def get_cached_debug_info():
+    if hasattr(st.session_state, 'app'):
+        return st.session_state.app.get_debug_info()
+    return {}
 
 if st.session_state.debug_mode:
     st.divider()
     st.subheader("🔍 RAG Pipeline Debug Information")
 
-    debug_info = st.session_state.app.get_debug_info()
+    debug_info = get_cached_debug_info()
 
     debug_tab1, debug_tab2, debug_tab3 = st.tabs(
         ["Current Query", "Add Operations", "DB Stats"]
     )
 
     with debug_tab1:
-        current_session = debug_info["current_session"]
+        current_session = debug_info.get("current_session", {})
         st.write("**Last Query Prompt:**")
-        st.write(current_session["prompt"])
+        st.write(current_session.get("prompt", "No prompt available"))
 
         st.write("**Retrieved Documents:**")
         st.write("Not available due to Embedchain API limitations.")
 
         st.write("**Response:**")
-        st.write(current_session["response"])
+        st.write(current_session.get("response", "No response available"))
 
     with debug_tab2:
         st.write("**Document Add Operations:**")
-        if debug_info["add_operations"]:
+        if debug_info.get("add_operations", []):
             for op in debug_info["add_operations"]:
+                status = "Success" if op["success"] else f"Failed: {op.get('error', 'Unknown error')}"
                 st.write(
                     f"- [{op['timestamp']}] Type: {op['data_type']}, "
-                    f"Success: {op['success']}, Duration: {op['duration']:.2f}s, "
+                    f"Status: {status}, Duration: {op['duration']:.2f}s, "
                     f"Snippet: {op['text_snippet']}"
                 )
         else:
@@ -414,17 +541,20 @@ if st.session_state.debug_mode:
     with debug_tab3:
         st.write("**Vector DB Stats:**")
         try:
-            if hasattr(st.session_state.app, "db"):
+            if hasattr(st.session_state, 'app') and hasattr(st.session_state.app, "db"):
+                logger.info("Accessing DB stats")
                 try:
                     count = st.session_state.app.db.count()
                     st.write(f"📈 Documents in DB: {count}")
                     logger.info(f"Current DB document count: {count}")
                 except Exception as e:
                     st.warning(f"Could not retrieve DB stats: {str(e)}")
+                    logger.error(f"DB stats error: {str(e)}")
             else:
                 st.write("No DB instance found.")
         except Exception as e:
             st.error(f"Error accessing vector DB: {str(e)}")
+            logger.error(f"Vector DB access error: {str(e)}")
 
 with st.sidebar.expander("🧪 RAG Component Testing", expanded=False):
     st.write("Test individual RAG components for troubleshooting.")
@@ -433,12 +563,16 @@ with st.sidebar.expander("🧪 RAG Component Testing", expanded=False):
     if st.button("Test Embedding", key="test_embed_btn"):
         with st.spinner("Testing embedding..."):
             try:
-                result = st.session_state.app.test_embedding(test_text)
-                if result["success"]:
-                    st.success(f"✅ Embedding successful - Dimension: {result['embedding_dimension']}")
-                    st.write("Sample of embedding vector:", result["embedding_sample"])
-                    st.write(f"Process took {result['duration']:.4f} seconds")
+                if not hasattr(st.session_state, 'app'):
+                    st.error("st.session_state.app is not initialized. Please restart the app.")
+                    logger.error("st.session_state.app is not initialized for test embedding")
                 else:
-                    st.error(f"❌ Embedding failed: {result['error']}")
+                    result = st.session_state.app.test_embedding(test_text)
+                    if result["success"]:
+                        st.success(f"✅ Embedding successful - Dimension: {result['embedding_dimension']}")
+                        st.write("Sample of embedding vector:", result['embedding_sample'])
+                        st.write(f"Process took {result['duration']:.4f} seconds")
+                    else:
+                        st.error(f"❌ Embedding failed: {result['error']}")
             except Exception as e:
                 st.error(f"Test failed with error: {str(e)}")
