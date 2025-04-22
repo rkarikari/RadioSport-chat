@@ -124,24 +124,33 @@ class DebugApp(App):
             return result
 
     def chat(self, prompt, **kwargs):
-        self.debug_info["current_session"] = {
-            "prompt": prompt,
-            "response": "",
-            "retrieved_docs": [],
-            "contexts": [],
-            "prompt": "",
-            "response": "",
-        }
-        start_time = time.time()
-        logger.info(f"Processing chat query: '{prompt[:50]}...'")
+        try:
+            logger.info(f"Chat called with prompt: '{prompt[:50]}...'")
+            self.debug_info["current_session"] = {
+                "prompt": prompt,
+                "response": "",
+                "retrieved_docs": [],
+                "contexts": [],
+                "chunks": [],
+                "embeddings": [],
+            }
+            start_time = time.time()
+            response = super().chat(prompt, **kwargs)
+            self.debug_info["current_session"]["response"] = response
+            duration = time.time() - start_time
+            logger.info(f"Chat response generated in {duration:.2f}s")
 
-        response = super().chat(prompt, **kwargs)
-
-        self.debug_info["current_session"]["response"] = response
-        duration = time.time() - start_time
-        logger.info(f"Chat response generated in {duration:.2f}s")
-
-        return response
+            # Update session state with latest debug info
+            if "debug_sessions" not in st.session_state:
+                st.session_state.debug_sessions = []
+            st.session_state.debug_sessions.append(self.debug_info["current_session"])
+            logger.info("Updated st.session_state.debug_sessions with new query")
+            return response
+        except Exception as e:
+            logger.error(f"Chat error: {str(e)}")
+            self.debug_info["current_session"]["response"] = f"Error: {str(e)}"
+            st.session_state.debug_sessions.append(self.debug_info["current_session"])
+            raise
 
     def test_embedding(self, text):
         try:
@@ -279,6 +288,9 @@ if "last_uploaded_image" not in st.session_state:
 
 if "debug_mode" not in st.session_state:
     st.session_state.debug_mode = False
+
+if "debug_sessions" not in st.session_state:
+    st.session_state.debug_sessions = []
 
 with st.sidebar:
     st.title("🗂️ File Management")
@@ -427,11 +439,13 @@ col1, col2 = st.columns([1, 1])
 with col1:
     if st.button("🧹 Clear Chat History"):
         st.session_state.messages = []
+        st.session_state.debug_sessions = []
         st.rerun()
 
 with col2:
     if st.button("🗑️ Flush RAG Cache"):
         st.session_state.messages = []
+        st.session_state.debug_sessions = []
         db_dir = None
         if "app" in st.session_state:
             try:
@@ -479,6 +493,7 @@ if prompt:
                 st.error("st.session_state.app is not initialized. Please restart the app.")
                 logger.error("st.session_state.app is not initialized for chat")
             else:
+                logger.info(f"Processing chat prompt: '{prompt[:50]}...'")
                 if st.session_state.last_uploaded_image is not None:
                     img_file = st.session_state.last_uploaded_image
                     with tempfile.NamedTemporaryFile(
@@ -495,11 +510,12 @@ if prompt:
                 filtered_response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
                 st.session_state.messages.append({"role": "assistant", "content": filtered_response})
                 message(filtered_response)
+                logger.info("Chat response processed and displayed")
         except Exception as e:
             st.error(f"Response error: {str(e)}")
+            logger.error(f"Chat processing error: {str(e)}")
 
-@st.cache_data(show_spinner=False)
-def get_cached_debug_info():
+def get_debug_info():
     if hasattr(st.session_state, 'app'):
         return st.session_state.app.get_debug_info()
     return {}
@@ -508,22 +524,23 @@ if st.session_state.debug_mode:
     st.divider()
     st.subheader("🔍 RAG Pipeline Debug Information")
 
-    debug_info = get_cached_debug_info()
+    debug_info = get_debug_info()
 
     debug_tab1, debug_tab2, debug_tab3 = st.tabs(
         ["Current Query", "Add Operations", "DB Stats"]
     )
 
     with debug_tab1:
-        current_session = debug_info.get("current_session", {})
-        st.write("**Last Query Prompt:**")
-        st.write(current_session.get("prompt", "No prompt available"))
-
-        st.write("**Retrieved Documents:**")
-        st.write("Not available due to Embedchain API limitations.")
-
-        st.write("**Response:**")
-        st.write(current_session.get("response", "No response available"))
+        st.write("**Recent Queries:**")
+        if st.session_state.debug_sessions:
+            for i, session in enumerate(reversed(st.session_state.debug_sessions[-5:])):  # Show last 5 queries
+                st.write(f"**Query {len(st.session_state.debug_sessions) - i}:**")
+                st.write(f"**Prompt:** {session.get('prompt', 'No prompt available')}")
+                st.write(f"**Response:** {session.get('response', 'No response available')}")
+                st.write("**Retrieved Documents:** Not available due to Embedchain API limitations.")
+                st.write("---")
+        else:
+            st.write("No queries recorded yet.")
 
     with debug_tab2:
         st.write("**Document Add Operations:**")

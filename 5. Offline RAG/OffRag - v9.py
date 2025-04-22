@@ -30,8 +30,8 @@ os.environ.pop("OPENAI_API_KEY", None)  # Enforce offline mode
 st.set_page_config(
     page_title="Multimodal Chat Assistant",
     page_icon="🌐",
-    layout="centered",
-    initial_sidebar_state="collapsed",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 # Setup logging for debugging and troubleshooting
@@ -512,7 +512,7 @@ with st.sidebar:
                                 errors.append(f"Empty text file: {file.name}")
                                 logger.warning(f"Empty text file: {file.name}")
                                 return messages, errors, None
-                            chunk_size = 2000
+                            chunk_size = 1000
                             chunks = [text_content[i:i + chunk_size] for i in range(0, len(text_content), chunk_size)]
                             messages.append(f"Split {file.name} into {len(chunks)} chunks")
                             start_time = time.time()
