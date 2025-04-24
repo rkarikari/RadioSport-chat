@@ -1,7 +1,10 @@
 streamlit
+chromadb
 embedchain
+pdfplumber
+pytesseract
+
 streamlit-chat
 pillow
-pytesseract
-pdfplumber
 numpy
+bcrypt
