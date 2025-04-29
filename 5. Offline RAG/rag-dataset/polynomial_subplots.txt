@@ -1,0 +1,65 @@
+# Polynomial curve 
+# polynomial graph 
+# polynomial 
+# generate a single page html file showing a 
+# polynomial graph `a*x** +b*x + c`, (generated svg images)
+# with the effects of the coefficients changing from -4 to 4.
+# All code must be contained in a single file. -->
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+import sys
+
+try:
+    # Define the initial coefficients for the polynomial
+    a = 1
+    b = -2
+    c = 3
+    d = 4
+
+    # Create an array of x values from -5 to 5
+    x = np.linspace(-5, 5, 100)
+
+    # Values to cycle through for each coefficient
+    values = list(range(-4, 5))  # Integers from -4 to 4
+
+    # Create a figure with 2x2 subplots
+    fig, axs = plt.subplots(2, 2, figsize=(8, 6))
+    axs = axs.flatten()  # Flatten for easy iteration
+    coefficients = ['a', 'b', 'c', 'd']
+
+    # Plot the effect of each coefficient
+    for idx, coef in enumerate(coefficients):
+        ax = axs[idx]
+        # Reset coefficients to initial values
+        a, b, c, d = 1, -2, 3, 4
+        
+        # Plot curves for each value of the current coefficient
+        for val in values:
+            if coef == 'a':
+                a = val
+            elif coef == 'b':
+                b = val
+            elif coef == 'c':
+                c = val
+            elif coef == 'd':
+                d = val
+            y = a*x**3 + b*x**2 + c*x + d
+            ax.plot(x, y, label=f'{coef}={val}')
+        
+        # Customize the subplot
+        ax.set_xlabel('x')
+        ax.set_ylabel('y')
+        ax.set_title(f'Effect of {coef}')
+        ax.legend()
+        ax.grid(True)
+
+    # Adjust layout to prevent overlap
+    plt.tight_layout()
+
+    # Display the plot
+    plt.show()
+
+except Exception as e:
+    print(f"Error during execution: {str(e)}", file=sys.stderr)

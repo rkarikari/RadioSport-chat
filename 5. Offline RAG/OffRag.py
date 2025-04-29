@@ -8,18 +8,32 @@ import logging
 from datetime import datetime
 import chromadb
 import embedchain
+from embedchain.app import App
 from tenacity import retry, stop_after_attempt, wait_fixed
 import streamlit as st
-from embedchain import App
 from streamlit_chat import message
 from PIL import Image
 import pytesseract
-from io import BytesIO
+from io import BytesIO, StringIO
 import numpy as np
 import concurrent.futures
 import pdfplumber
 import multiprocessing
 import bcrypt
+import pkg_resources
+import requests
+import json
+import uuid
+import types  # For generator detection
+import hashlib  # For generating embedding IDs
+
+import matplotlib.pyplot as plt # For plotting
+import seaborn as sns # For data visualization
+import pandas as pd # For data manipulation
+
+
+# Version tracking
+APP_VERSION = "v2.0.0.3"
 
 # Uncomment and update if Tesseract is not in PATH
 # pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
@@ -28,10 +42,31 @@ os.environ.pop("OPENAI_API_KEY", None)  # Enforce offline mode
 
 # --- GUI Configuration ---
 st.set_page_config(
-    page_title="Multimodal Chat Assistant",
-    page_icon="🌐",
+    page_title="RadioSport Chat",
+    page_icon="🧟",
     layout="centered",
     initial_sidebar_state="collapsed",
+    menu_items= {
+        'Report a Bug': "https://github.com/rkarikari/RadioSport-chat",
+        'About':"Copyright © 2025 RadioSport. All rights reserved."
+    }
+)
+
+# Include MathJax for LaTeX rendering (offline configuration)
+st.markdown(
+    """
+    <script src="static/mathjax/tex-chtml.js" id="MathJax-script" onload="console.log('MathJax script loaded');" onerror="console.error('Failed to load MathJax script');"></script>
+    <script>
+        MathJax.Hub.Config({
+            tex2jax: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']],
+                processEscapes: true
+            }
+        });
+    </script>
+    """,
+    unsafe_allow_html=True
 )
 
 # --- Logging Setup ---
@@ -41,8 +76,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger("rag_assistant")
 
+# Log versions
 logger.info(f"Using chromadb version: {chromadb.__version__}")
 logger.info(f"Using embedchain version: {embedchain.__version__}")
+logger.info(f"Application version: {APP_VERSION}")
+try:
+    streamlit_version = pkg_resources.get_distribution("streamlit").version
+    logger.info(f"Using streamlit version: {streamlit_version}")
+except pkg_resources.DistributionNotFound:
+    logger.warning("Streamlit version not found")
+    streamlit_version = "unknown"
+
+# Verify Streamlit version
+if streamlit_version != "unknown":
+    try:
+        from packaging import version
+        if version.parse(streamlit_version) < version.parse("1.12.0"):
+            st.error(
+                "Streamlit version <1.12.0 lacks st.write_stream, limiting streaming capabilities. "
+                "Upgrade to 1.42.0 or higher: `pip install --upgrade streamlit`"
+            )
+            logger.error("Streamlit version <1.12.0 detected; st.write_stream unavailable")
+    except Exception as e:
+        logger.warning(f"Failed to parse Streamlit version: {str(e)}")
 
 # --- RAG Pipeline: DebugApp Class ---
 class DebugApp(App):
@@ -58,6 +114,7 @@ class DebugApp(App):
                 "contexts": [],
                 "prompt": "",
                 "response": "",
+                "streaming_info": {"chunk_count": 0, "response_type": "", "chunks_received": []},
             },
         }
         self._embedding_dimension = None  # Lazy computation
@@ -106,18 +163,53 @@ class DebugApp(App):
                 self._embedding_dimension = 0
         return self._embedding_dimension
 
+    def _generate_embedding_id(self, text, file_name="Unknown"):
+        """Generate a unique embedding ID based on text and file name."""
+        content = f"{file_name}:{text}"
+        return f"default-app-id--{hashlib.sha256(content.encode('utf-8')).hexdigest()}"
+
     def add(self, *args, debug_mode=False, file_name="Unknown", **kwargs):
         start_time = time.time()
         data_type = kwargs.get("data_type", "unknown")
         text_snippet = str(args[0])[:100] + "..." if args and args[0] else "No text"
         if debug_mode:
-            logger.debug(f"Adding document (type={data_type}, file_name={file_name}): snippet='{text_snippet}'")
+            logger.info(f"Adding document (type={data_type}, file_name={file_name}): snippet='{text_snippet}'")
 
         try:
             if not args or not args[0].strip():
                 raise ValueError("Empty text provided to embed")
+            text = args[0]
+            embedding_id = self._generate_embedding_id(text, file_name)
+            # Check if embedding ID already exists
+            try:
+                collection = self.db.client.get_collection("default")
+                existing = collection.get(ids=[embedding_id])
+                if existing['ids']:
+                    if debug_mode:
+                        logger.info(f"Skipping duplicate embedding ID: {embedding_id}")
+                    duration = time.time() - start_time
+                    operation_info = {
+                        "timestamp": datetime.now().isoformat(),
+                        "data_type": data_type,
+                        "file_name": file_name,
+                        "text_snippet": text_snippet,
+                        "duration": duration,
+                        "success": True,
+                        "embedding_dimension": self._compute_embedding_dimension(),
+                        "status": "Skipped (Duplicate)",
+                        "total_chunks": 1,
+                        "successful_chunks": 0,
+                        "total_duration": duration,
+                        "avg_duration": duration,
+                    }
+                    self.debug_info["add_operations"].append(operation_info)
+                    return operation_info
+            except Exception as e:
+                if debug_mode:
+                    logger.warning(f"Error checking existing embedding ID {embedding_id}: {str(e)}")
+
             embedding_dimension = self._compute_embedding_dimension() if debug_mode else 0
-            result = super().add(args[0], **kwargs)
+            result = super().add(text, **kwargs)
             if result is None:
                 raise ValueError("Embedding result is None")
             duration = time.time() - start_time
@@ -171,19 +263,60 @@ class DebugApp(App):
                 "contexts": [],
                 "chunks": [],
                 "embeddings": [],
+                "streaming CNBC": {"chunk_count": 0, "response_type": "", "chunks_received": []},
             }
             start_time = time.time()
-            response = super().chat(prompt, **kwargs)
-            self.debug_info["current_session"]["response"] = response
-            duration = time.time() - start_time
+            chunk_count = 0
+            # Remove 'stream' from kwargs to avoid duplication
+            kwargs = {k: v for k, v in kwargs.items() if k != 'stream'}
+            # Explicitly enable streaming
+            response = super().chat(prompt, stream=True, **kwargs)
             if debug_mode:
-                logger.debug(f"Chat response generated in {duration:.2f}s")
+                response_type = type(response).__name__
+                self.debug_info["current_session"]["streaming_info"]["response_type"] = response_type
+                logger.debug(f"super().chat response type: {response_type}")
+            # Ensure response is iterable
+            if not hasattr(response, '__iter__') or isinstance(response, (str, bytes)):
+                if debug_mode:
+                    logger.warning(f"Non-iterable response from super().chat: {type(response).__name__}, wrapping as generator")
+                response = iter([str(response)])  # Wrap non-iterable response
+            for chunk in response:
+                chunk_count += 1
+                if isinstance(chunk, dict):
+                    chunk = chunk.get('text', '')  # Handle dict chunks
+                elif not isinstance(chunk, str):
+                    chunk = str(chunk)  # Convert non-string chunks
+                if debug_mode:
+                    self.debug_info["current_session"]["streaming_info"]["chunks_received"].append({
+                        "chunk_number": chunk_count,
+                        "content": chunk[:50] + "..." if len(chunk) > 50 else chunk,
+                        "length": len(chunk),
+                        "timestamp": time.time() - start_time,
+                    })
+                    logger.debug(
+                        f"Raw chunk {chunk_count} from super().chat at {time.time() - start_time:.2f}s: "
+                        f"'{chunk[:50]}...' (len={len(chunk)})"
+                    )
+                # Filter out unwanted tags
+                filtered_chunk = re.sub(r"<think>.*?</think>", "", chunk, flags=re.DOTALL)
+                if filtered_chunk.strip():
+                    if debug_mode:
+                        logger.debug(
+                            f"Yielding filtered chunk {chunk_count} at {time.time() - start_time:.2f}s: "
+                            f"'{filtered_chunk[:50]}...' (len={len(filtered_chunk)})"
+                        )
+                    yield filtered_chunk
+                    self.debug_info["current_session"]["response"] += filtered_chunk
+            # Update chunk count
+            if debug_mode:
+                self.debug_info["current_session"]["streaming_info"]["chunk_count"] = chunk_count
+                logger.debug(f"Chat response completed in {time.time() - start_time:.2f}s, total chunks: {chunk_count}")
             st.session_state.debug_sessions.append(self.debug_info["current_session"])
             if len(st.session_state.debug_sessions) > 100:
                 st.session_state.debug_sessions = st.session_state.debug_sessions[-100:]
-            return response
+            return self.debug_info["current_session"]["response"]
         except Exception as e:
-            logger.error(f"Chat error: {str(e)}")
+            logger.error(f"Chat error: {e}")
             self.debug_info["current_session"]["response"] = f"Error: {str(e)}"
             st.session_state.debug_sessions.append(self.debug_info["current_session"])
             raise
@@ -258,8 +391,8 @@ def embedchain_bot(db_path, debug_mode=False):
                     "provider": "ollama",
                     "config": {
                         "model": "granite3.3:2b",
-                        "max_tokens": 1000,
-                        "temperature": 0.3,
+                        "max_tokens": 500,
+                        "temperature": 0.5,
                         "stream": True,
                         "base_url": "http://localhost:11434",
                     },
@@ -335,6 +468,116 @@ def safe_rmtree(path, attempt=1, debug_mode=False):
         logger.error(f"Error deleting directory {path} on attempt {attempt}: {str(e)}")
         raise
 
+def ollama_raw_stream(prompt, debug_mode=False):
+    """Utility function for Ollama raw streaming with conversation history."""
+    try:
+        if debug_mode:
+            logger.debug(f"Ollama raw streaming with prompt: '{prompt[:50]}...'")
+        start_time = time.time()
+        chunk_count = 0
+        
+        # Build conversation history
+        history = ""
+        for msg in st.session_state.messages[:-1]:  # Exclude the current prompt
+            if msg["role"] == "user":
+                history += f"User: {msg['content']}\n"
+            elif msg["role"] == "assistant":
+                history += f"Assistant: {msg['content']}\n"
+        # Append current prompt
+        full_prompt = f"{history}User: {prompt}\nAssistant: " if history else f"User: {prompt}\nAssistant: "
+        if debug_mode:
+            logger.debug(f"Full prompt with history: '{full_prompt[:100]}...'")
+
+        url = "http://localhost:11434/api/generate"
+        payload = {
+            "model": "granite3.3:2b",
+            "prompt": full_prompt,
+            "stream": True
+        }
+        with requests.post(url, json=payload, stream=True) as r:
+            for line in r.iter_lines():
+                if line:
+                    chunk_count += 1
+                    chunk = line.decode('utf-8')
+                    try:
+                        json_data = json.loads(chunk)
+                        text = json_data.get('response', '')
+                    except json.JSONDecodeError:
+                        text = chunk  # Fallback to raw chunk if not JSON
+                    if debug_mode:
+                        logger.debug(
+                            f"Ollama raw chunk {chunk_count} received at {time.time() - start_time:.2f}s: "
+                            f"'{chunk[:50]}...' (len={len(chunk)}), text: '{text[:50]}...'"
+                        )
+                    yield text
+        duration = time.time() - start_time
+        if debug_mode:
+            logger.debug(f"Ollama raw streaming completed in {duration:.2f}s, total chunks: {chunk_count}")
+    except Exception as e:
+        logger.error(f"Ollama raw streaming error: {str(e)}")
+        yield f"Error: {str(e)}"
+
+def save_chat_history():
+    """Save chat history to a JSON file."""
+    try:
+        history_file = "chat_history.json"
+        with open(history_file, "w", encoding="utf-8") as f:
+            json.dump(st.session_state.messages, f, ensure_ascii=False, indent=2)
+        if st.session_state.debug_enabled:
+            logger.debug(f"Saved chat history to {history_file}")
+    except Exception as e:
+        logger.error(f"Failed to save chat history: {str(e)}")
+
+def load_chat_history():
+    """Load chat history from a JSON file if it exists."""
+    try:
+        history_file = "chat_history.json"
+        if os.path.exists(history_file):
+            with open(history_file, "r", encoding="utf-8") as f:
+                messages = json.load(f)
+                if isinstance(messages, list):
+                    st.session_state.messages = messages
+                    if st.session_state.debug_enabled:
+                        logger.debug(f"Loaded {len(messages)} messages from {history_file}")
+                else:
+                    logger.warning(f"Invalid chat history format in {history_file}")
+        else:
+            if st.session_state.debug_enabled:
+                logger.debug(f"No chat history file found at {history_file}")
+    except Exception as e:
+        logger.error(f"Failed to load chat history: {str(e)}")
+
+def save_config():
+    """Save configuration (e.g., use_streaming) to a JSON file."""
+    try:
+        config_file = "config.json"
+        config = {"use_streaming": st.session_state.use_streaming}
+        with open(config_file, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        if st.session_state.debug_enabled:
+            logger.debug(f"Saved config to {config_file}")
+    except Exception as e:
+        logger.error(f"Failed to save config: {str(e)}")
+
+def load_config():
+    """Load configuration from a JSON file if it exists."""
+    try:
+        config_file = "config.json"
+        if os.path.exists(config_file):
+            with open(config_file, "r", encoding="utf-8") as f:
+                config = json.load(f)
+                if isinstance(config, dict):
+                    st.session_state.use_streaming = config.get("use_streaming", False)
+                    if st.session_state.debug_enabled:
+                        logger.debug(f"Loaded config from {config_file}: use_streaming={st.session_state.use_streaming}")
+                else:
+                    logger.warning(f"Invalid config format in {config_file}")
+        else:
+            if st.session_state.debug_enabled:
+                logger.debug(f"No config file found at {config_file}")
+    except Exception as e:
+        logger.error(f"Failed to load config: {str(e)}")
+
 def initialize_app():
     try:
         if st.session_state.debug_enabled:
@@ -342,6 +585,10 @@ def initialize_app():
         db_path = "./chroma_db"
         os.makedirs(db_path, exist_ok=True)
         st.session_state.db_dir = db_path
+
+        # Load configuration and chat history
+        load_config()
+        load_chat_history()
 
         if hasattr(st.session_state, 'app') and hasattr(st.session_state.app, 'db'):
             try:
@@ -472,7 +719,7 @@ def extract_chunks(uploaded_files, debug_mode=False):
                 elif file.type.startswith("image/"):
                     img = Image.open(temp_path)
                     max_size = 1024
-                    if img.width > max_size or img.height > max_size:
+                    if img.width > maxtransition_size or img.height > max_size:
                         img.thumbnail((max_size, max_size))
                         resized_path = os.path.join(temp_dir, f"resized_{file.name}")
                         img.save(resized_path)
@@ -494,6 +741,7 @@ def extract_chunks(uploaded_files, debug_mode=False):
                     except UnicodeDecodeError:
                         with open(temp_path, "r", encoding="latin1") as f:
                             text_content = f.read()
+
                     if not text_content.strip():
                         errors.append(f"Empty text file: {file.name}")
                         logger.warning(f"Empty text file: {file.name}")
@@ -527,7 +775,8 @@ def process_chunk(app, file_name, chunk_text, data_type, debug_mode, completed_c
             completed_chunks.value += 1
         if debug_mode:
             logger.debug(f"Incremented completed_chunks to {completed_chunks.value} for chunk in {file_name}")
-        return file_name, stat
+        status_message = f"Processed chunk {completed_chunks.value}/{total_chunks} for {file_name}: {stat['status']}"
+        return file_name, stat, status_message
     except Exception as e:
         if debug_mode:
             logger.error(f"Error processing chunk for {file_name}: {str(e)}")
@@ -535,6 +784,7 @@ def process_chunk(app, file_name, chunk_text, data_type, debug_mode, completed_c
             completed_chunks.value += 1
         if debug_mode:
             logger.debug(f"Incremented completed_chunks to {completed_chunks.value} for failed chunk in {file_name}")
+        status_message = f"Processed chunk {completed_chunks.value}/{total_chunks} for {file_name}: Failed ({str(e)})"
         return file_name, {
             "success": False,
             "error": str(e),
@@ -545,7 +795,7 @@ def process_chunk(app, file_name, chunk_text, data_type, debug_mode, completed_c
             "successful_chunks": 0,
             "total_duration": 0,
             "avg_duration": 0,
-        }
+        }, status_message
 
 # --- Session State Initialization ---
 session_defaults = {
@@ -558,6 +808,12 @@ session_defaults = {
         "admin": "$2b$12$G.v2ZJlD4HasyM5Yy0XYFeEysl2SCJSUX0N8RXctoLoxcHPyScf8G"  # Hash for "admin123"
     },
     "show_login_panel": True,
+    "use_streaming": False,
+    "partial_response": "",
+    "streaming_session_id": 0,  # For debugging, not used in keys
+    "streaming_active": False,  # Lock to prevent concurrent streaming
+    "confirm_clear_chat": False,
+    "confirm_reset_session": False,
 }
 for key, value in session_defaults.items():
     if key not in st.session_state:
@@ -594,27 +850,33 @@ with st.sidebar:
                 )
 
             if st.button("🚀 Add to Knowledge Base", type="primary"):
-                with st.spinner("Processing files..."):
+                with st.status("Processing files...", expanded=True) as status_container:
                     if not hasattr(st.session_state, 'app'):
                         try:
                             logger.warning("st.session_state.app missing, reinitializing")
                             initialize_app()
                         except Exception as e:
-                            st.error(f"Failed to reinitialize app: {str(e)}")
+                            status_container.error(f"Failed to reinitialize app: {str(e)}")
                             st.stop()
 
-                    # Extract chunks and initialize progress
+                    # Extract chunks
+                    status_container.write("Extracting file content...")
                     chunks, extract_messages, extract_errors, temp_files = extract_chunks(uploaded_files, st.session_state.debug_enabled)
                     total_chunks = estimate_total_chunks(uploaded_files)
                     completed_chunks = multiprocessing.Value('i', 0)
-                    progress_bar = st.progress(0.0, text="Starting file processing...")
 
-                    # Process chunks
+                    # Process chunks with streaming updates
+                    status_container.write(f"Processing {total_chunks} chunks...")
                     file_stats = {}
                     all_messages = extract_messages[:]
                     all_errors = extract_errors[:]
+                    status_messages = []
                     max_workers = min(multiprocessing.cpu_count() * 2, 16)  # Dynamic for I/O-bound tasks
                     debug_mode = st.session_state.debug_enabled
+
+                    # Initialize progress bar
+                    progress_bar = status_container.progress(0.0, text="Processing chunks...")
+
                     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                         futures = [
                             executor.submit(
@@ -622,41 +884,52 @@ with st.sidebar:
                             )
                             for file_name, chunk_text, data_type in chunks
                         ]
+                        processed_chunks = 0
                         for future in concurrent.futures.as_completed(futures):
                             try:
-                                file_name, stat = future.result()
+                                file_name, stat, status_message = future.result()
                                 if file_name not in file_stats:
                                     file_stats[file_name] = []
                                 file_stats[file_name].append(stat)
-                                progress = min(completed_chunks.value / total_chunks, 1.0)
-                                progress_text = f"Processing {file_name} (chunk {completed_chunks.value}/{total_chunks})"
-                                progress_bar.progress(progress, text=progress_text)
-                                if debug_mode:
-                                    logger.debug(f"Progress: {progress_text}, {progress*100:.1f}%")
+                                status_messages.append(status_message)
+                                processed_chunks += 1
+                                # Update progress bar in main thread
+                                progress_bar.progress(
+                                    min(processed_chunks / total_chunks, 1.0),
+                                    text=f"Processed {processed_chunks}/{total_chunks} chunks"
+                                )
                             except Exception as e:
                                 all_errors.append(f"Thread execution error: {str(e)}")
                                 logger.error(f"Thread execution error: {e}", exc_info=True)
                                 with completed_chunks.get_lock():
                                     completed_chunks.value += 1
-                                progress = min(completed_chunks.value / total_chunks, 1.0)
-                                progress_text = f"Processing files (chunk {completed_chunks.value}/{total_chunks})"
-                                progress_bar.progress(progress, text=progress_text)
-                                if debug_mode:
-                                    logger.debug(f"Progress (thread error): {progress_text}, {progress*100:.1f}%")
+                                processed_chunks += 1
+                                status_messages.append(f"Processed chunk {completed_chunks.value}/{total_chunks}: Error ({str(e)})")
+                                # Update progress bar on error
+                                progress_bar.progress(
+                                    min(processed_chunks / total_chunks, 1.0),
+                                    text=f"Processed {processed_chunks}/{total_chunks} chunks"
+                                )
+
+                    # Display status messages in the main thread
+                    for msg in status_messages:
+                        status_container.write(msg)
 
                     # Generate file-level summaries
                     for file_name, stats in file_stats.items():
                         total_chunks_file = len(stats)
                         successful_chunks = sum(1 for stat in stats if stat["success"])
+                        skipped_chunks = sum(1 for stat in stats if stat["status"] == "Skipped (Duplicate)")
                         sum_duration = sum(stat["duration"] for stat in stats)
                         avg_duration = sum_duration / total_chunks_file if total_chunks_file > 0 else 0
                         embedding_dimension = next(
                             (stat["embedding_dimension"] for stat in stats if stat["success"]), 0
                         )
                         error_messages = [stat["error"] for stat in stats if not stat["success"]]
-                        status = "Success" if successful_chunks == total_chunks_file else f"Failed: {', '.join(error_messages)}"
+                        status = "Success" if successful_chunks + skipped_chunks == total_chunks_file else f"Failed: {', '.join(error_messages)}"
                         all_messages.append(
                             f"Processed {file_name}: {successful_chunks}/{total_chunks_file} chunks successful, "
+                            f"{skipped_chunks} skipped (duplicates), "
                             f"Embedding Dimension: {embedding_dimension}, "
                             f"Total Duration: {sum_duration:.2f}s, "
                             f"Avg Duration: {avg_duration:.2f}s, "
@@ -665,23 +938,23 @@ with st.sidebar:
                         if debug_mode:
                             logger.debug(f"File summary for {file_name}: {status}, {successful_chunks}/{total_chunks_file} chunks")
 
-                    # Ensure progress bar completion
-                    progress_bar.progress(1.0, text="File processing complete")
-                    if debug_mode:
-                        logger.debug(f"Processing complete, total chunks: {total_chunks}")
-
+                    # Finalize status
+                    progress_bar.progress(1.0, text="Processing complete")
+                    status_container.update(label="File processing complete", state="complete")
                     for msg in all_messages:
                         st.write(msg)
-                    if all_errors:
-                        with st.expander("View Processing Errors"):
-                            for file_name in set(file_name for file_name, _, _ in chunks):
-                                file_errors = [err for err in all_errors if file_name in err]
-                                if file_errors:
-                                    st.write(f"**{file_name}**:")
-                                    for err in file_errors:
-                                        st.error(err)
-                    else:
-                        st.success("✅ All files processed successfully")
+
+                # Display errors outside the status container
+                if all_errors:
+                    st.subheader("Processing Errors")
+                    for file_name in set(file_name for file_name, _, _ in chunks):
+                        file_errors = [err for err in all_errors if file_name in err]
+                        if file_errors:
+                            st.write(f"**{file_name}**:")
+                            for err in file_errors:
+                                st.error(err)
+                else:
+                    st.success("✅ All files processed successfully")
 
             st.divider()
             st.subheader("📄 File Preview")
@@ -700,20 +973,52 @@ with st.sidebar:
             key="debug_checkbox",
             on_change=lambda: st.session_state.update(debug_enabled=st.session_state.debug_checkbox)
         )
+        st.checkbox(
+            "🔬 Use Streaming Mode (Disables RAG)",
+            value=st.session_state.use_streaming,
+            key="streaming_checkbox",
+            on_change=lambda: (
+                st.session_state.update(use_streaming=st.session_state.streaming_checkbox),
+                save_config()
+            )
+        )
+
+        st.divider()
+        with st.container():
+            col1, col2 = st.columns([2, 1], gap="small")
+            with col1:
+                st.button(
+                    "🔄 Reset Session State",
+                    disabled=not st.session_state.confirm_reset_session,
+                    on_click=lambda: (
+                        st.session_state.update({k: v for k, v in session_defaults.items()}),
+                        os.remove("chat_history.json") if os.path.exists("chat_history.json") else None,
+                        os.remove("config.json") if os.path.exists("config.json") else None,
+                        logger.info("Session state reset"),
+                        st.rerun()
+                    )
+                )
+            with col2:
+                st.checkbox(
+                    "Confirm Reset",
+                    value=False,
+                    key="confirm_reset_session"
+                )
 
         st.divider()
         if st.button("🔒 Logout"):
             st.session_state.is_authenticated = False
             st.session_state.debug_enabled = False
+            st.session_state.use_streaming = False
             st.session_state.last_uploaded_image = None
             st.session_state.show_login_panel = True
             st.session_state.debug_sessions = []
+            save_config()  # Save use_streaming=False
             logger.info("User logged out")
             st.rerun()
 
     elif st.session_state.show_login_panel:
         st.subheader("🔐 Admin Login")
-        # Modified: Removed st.info with login credentials
         with st.form(key="login_form"):
             username = st.text_input("Username", help="Enter your username")
             password = st.text_input("Password", type="password", help="Enter your password")
@@ -736,56 +1041,308 @@ with st.sidebar:
                         st.error("Invalid username or password")
 
 # --- GUI: Main Content ---
-st.title("🌐 Multimodal Chat Assistant")
-st.caption("Chat with documents, images, audio, and video using gemma3:4b vision model")
+st.title("RadioSport Chat")
+st.caption(f"Version {APP_VERSION}")
 
+# Safe message rendering for user messages
+def safe_message(content, is_user=False, key=None):
+    try:
+        if isinstance(content, types.GeneratorType):
+            if st.session_state.debug_enabled:
+                logger.warning("Generator object detected in message content, converting to string")
+            try:
+                content = "".join(content)
+            except Exception as e:
+                content = f"Error consuming generator: {str(e)}"
+                logger.error(f"Failed to consume generator in message: {str(e)}")
+        elif not isinstance(content, str):
+            if st.session_state.debug_enabled:
+                logger.warning(f"Non-string content type {type(content)} in message, converting to string")
+            content = str(content)
+        message(content, is_user=is_user, key=key)
+    except Exception as e:
+        logger.error(f"Error rendering message: {str(e)}")
+        message(f"Error rendering message: {str(e)}", is_user=is_user, key=key)
+
+# Function to validate and sanitize LaTeX content
+def validate_latex(content):
+    """Validate LaTeX content by checking for balanced braces and completing incomplete expressions."""
+    if not isinstance(content, str):
+        content = str(content)
+    
+    # Count braces to detect unbalanced pairs
+    brace_count = 0
+    in_math_mode = False
+    sanitized = ""
+    i = 0
+    
+    while i < len(content):
+        char = content[i]
+        
+        if char == '$':
+            if i + 1 < len(content) and content[i + 1] == '$':
+                # Display math mode toggle
+                in_math_mode = not in_math_mode
+                sanitized += '$$'
+                i += 2
+                continue
+            else:
+                # Inline math mode toggle
+                in_math_mode = not in_math_mode
+                sanitized += '$'
+                i += 1
+                continue
+        elif char == '{' and in_math_mode:
+            brace_count += 1
+            sanitized += char
+        elif char == '}' and in_math_mode:
+            brace_count -= 1
+            sanitized += char
+        else:
+            sanitized += char
+        i += 1
+    
+    # Close any open math modes
+    if in_math_mode:
+        if content.startswith('$$'):
+            sanitized += '$$'
+        else:
+            sanitized += '$'
+    # Close any open braces in math mode
+    while brace_count > 0:
+        sanitized += '}'
+        brace_count -= 1
+    
+    # Handle incomplete summation expressions (e.g., \sum_{i)
+    if r'\sum' in sanitized:
+        # Check for incomplete \sum expressions
+        sum_pattern = r'\\sum(_[{][^}]*?)(?![^{]*})'
+        sanitized = re.sub(sum_pattern, r'\\sum\1}', sanitized)
+        
+        # Ensure upper bound exists
+        sum_bound_pattern = r'\\sum(_[{][^}]+[}])(?![^{]*\^)'
+        sanitized = re.sub(sum_bound_pattern, r'\\sum\1^{n}', sanitized)
+    
+    return sanitized
+
+# Function to format content with LaTeX
+def format_latex_content(content):
+    """Detect, validate, and wrap LaTeX expressions for proper rendering."""
+    if not isinstance(content, str):
+        content = str(content)
+    
+    # Preprocess to replace \(, \), \[, \] and their escaped versions with $, $$
+    content = re.sub(r'\\[\(\)]', '$', content)  # Replace \( and \) with $
+    content = re.sub(r'\\{2}[\(\)]', '$', content)  # Replace \\( and \\) with $
+    content = re.sub(r'\\[\[\]]', '$$', content)  # Replace \[ and \] with $$
+    content = re.sub(r'\\{2}[\[\]]', '$$', content)  # Replace \\[ and \\] with $$
+    
+    # Validate and sanitize the content
+    content = validate_latex(content)
+    
+    # Updated regex to handle LaTeX patterns, excluding \(...\) and \[...\] since they are now $...$ and $$...$$
+    latex_pattern = r'(\$\$.*?\$\$|\$.*?\$|\\(?:sum|frac|sqrt|vec|mathbf|mathrm|[a-zA-Z]+)(?:_[{][^}]*[}]|\^{[^}]+}|\b|[{][^}]*[}])?)'
+    parts = []
+    last_end = 0
+    
+    for match in re.finditer(latex_pattern, content, re.DOTALL):
+        start, end = match.span()
+        # Add text before the LaTeX
+        if start > last_end:
+            parts.append(content[last_end:start])
+        # Handle the LaTeX expression
+        latex = match.group(0)
+        if latex.startswith('$$') and latex.endswith('$$'):
+            parts.append(latex)  # Display math
+        elif latex.startswith('$') and latex.endswith('$'):
+            parts.append(latex)  # Inline math
+        elif latex.startswith('\\'):
+            # Handle LaTeX commands (e.g., \sum, \frac)
+            parts.append(f"${latex}$")
+        else:
+            parts.append(latex)
+        last_end = end
+    
+    # Add remaining text
+    if last_end < len(content):
+        parts.append(content[last_end:])
+    
+    return ''.join(parts)
+
+# Render chat history
 for i, msg in enumerate(st.session_state.messages):
-    message(msg["content"], is_user=msg["role"] == "user", key=str(i))
+    if msg["role"] == "user":
+        safe_message(msg["content"], is_user=True, key=str(i))
+    else:
+        # Assistant messages
+        content = msg["content"]
+        if isinstance(content, types.GeneratorType):
+            if st.session_state.debug_enabled:
+                logger.warning("Generator object detected in assistant message content, converting to string")
+            try:
+                content = "".join(content)
+            except Exception as e:
+                content = f"Error consuming generator: {str(e)}"
+                logger.error(f"Failed to consume generator in assistant message: {str(e)}")
+        elif not isinstance(content, str):
+            if st.session_state.debug_enabled:
+                logger.warning(f"Non-string content type {type(content)} in assistant message, converting to string")
+            content = str(content)
+        try:
+            # Check if the content is a base64-encoded image
+            if content.startswith("data:image/png;base64,"):
+                st.image(content, use_container_width=True)
+            else:
+                # Handle text with LaTeX formatting
+                formatted_content = format_latex_content(content)
+                st.markdown(f"**Assistant:** {formatted_content}", unsafe_allow_html=True)
+        except Exception as e:
+            logger.error(f"Failed to render assistant message: {str(e)}")
+            st.markdown(f"**Assistant:** {content} (Rendering failed: {str(e)})", unsafe_allow_html=True)
 
 col1, col2 = st.columns([1, 1])
 
 with col1:
-    if st.button("🧹 Clear Chat History"):
+    st.checkbox(
+        "Confirm: Clear chat history",
+        value=False,
+        key="confirm_clear_chat"
+    )
+    if st.button("🧹 Clear Chat History", disabled=not st.session_state.confirm_clear_chat):
         st.session_state.messages = []
         st.session_state.debug_sessions = []
+        st.session_state.streaming_session_id = 0  # Reset session ID
+        st.session_state.streaming_active = False  # Reset streaming lock
+        if os.path.exists("chat_history.json"):
+            os.remove("chat_history.json")
+        logger.info("Chat history cleared")
         st.rerun()
 
 prompt = st.chat_input("Ask about your files or images...")
 
 if prompt:
+    # Validate messages is a list
+    if not isinstance(st.session_state.messages, list):
+        st.session_state.messages = []
+        logger.warning("st.session_state.messages was not a list, reinitialized as empty list")
+    
     st.session_state.messages.append({"role": "user", "content": prompt})
-    message(prompt, is_user=True)
+    safe_message(prompt, is_user=True, key=str(len(st.session_state.messages) - 1))
+    save_chat_history()
 
     with st.spinner("🔍 Analyzing..."):
         try:
             if not hasattr(st.session_state, 'app'):
                 st.error("st.session_state.app is not initialized. Please restart the app.")
+                st.session_state.messages.append({"role": "assistant", "content": "st.session_state.app is not initialized. Please restart the app."})
+                save_chat_history()
+                st.rerun()
+            # Ensure streaming_active is initialized
+            if 'streaming_active' not in st.session_state:
+                st.session_state.streaming_active = False
+                logger.warning("Initialized missing st.session_state.streaming_active to False")
+            if st.session_state.streaming_active:
+                st.session_state.messages.append({"role": "assistant", "content": "A streaming session is already active. Please wait for it to complete."})
+                save_chat_history()
+                if st.session_state.debug_enabled:
+                    logger.debug("Appended message: Streaming session already active")
+                st.rerun()
             else:
                 if st.session_state.debug_enabled:
                     logger.debug(f"Processing chat prompt: '{prompt[:50]}...'")
-                if st.session_state.last_uploaded_image is not None:
-                    img_file = st.session_state.last_uploaded_image
-                    with tempfile.NamedTemporaryFile(
-                        delete=False, suffix=os.path.splitext(img_file.name)[1]
-                    ) as tmp_img:
-                        tmp_img.write(img_file.getvalue())
-                        img_path = tmp_img.name
-                    response = st.session_state.app.chat(
-                        prompt, debug_mode=st.session_state.debug_enabled, image=img_path
-                    )
-                    os.remove(img_path)
+                st.session_state.streaming_active = True
+                if st.session_state.use_streaming:
+                    # Streaming mode: Use Ollama raw streaming with history
+                    st.session_state.streaming_session_id += 1
+                    session_id = st.session_state.streaming_session_id
+                    response_chunks = ollama_raw_stream(prompt, debug_mode=st.session_state.debug_enabled)
+                    text = ""
+                    progress_bar = st.progress(0)
+                    chunk_count = 0
+                    total_chunks_estimated = 10  # Estimate for progress bar
+                    placeholder = st.empty()  # Placeholder for streaming text
+                    try:
+                        for chunk in st.write_stream(response_chunks):
+                            chunk_count += 1
+                            text += chunk
+                            formatted_text = format_latex_content(text)
+                            placeholder.markdown(f"**Assistant:** {formatted_text}", unsafe_allow_html=True)
+                            if st.session_state.debug_enabled:
+                                logger.debug(
+                                    f"Streamed chunk {chunk_count} at {time.time():.2f}s: "
+                                    f"'{chunk[:50]}...' (len={len(chunk)}, total_len={len(text)}, session_id={session_id})"
+                                )
+                            progress_bar.progress(min(chunk_count / total_chunks_estimated, 1.0))
+                        # Append final response with LaTeX formatting
+                            formatted_text = format_latex_content(text)
+                        st.session_state.messages.append({"role": "assistant", "content": formatted_text})
+                        save_chat_history()
+                        progress_bar.progress(1.0)
+                        st.session_state.streaming_active = False
+                        if st.session_state.debug_enabled:
+                            logger.debug(f"Streaming completed, final response: '{text[:50]}...'")
+                        st.rerun()
+                    except Exception as e:
+                        logger.error(f"Rendering error (streaming): {str(e)}")
+                        formatted_error = format_latex_content(f"Rendering error: {str(e)}")
+                        placeholder.markdown(f"**Assistant:** {formatted_error}", unsafe_allow_html=True)
+                        st.session_state.messages.append({"role": "assistant", "content": formatted_error})
+                        save_chat_history()
+                        progress_bar.progress(1.0)
+                        st.session_state.streaming_active = False
+                        st.rerun()
                 else:
-                    response = st.session_state.app.chat(
+                    # Non-streaming: Use embedchain's chat for RAG
+                    response_chunks = st.session_state.app.chat(
                         prompt, debug_mode=st.session_state.debug_enabled
                     )
-                filtered_response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
-                st.session_state.messages.append({"role": "assistant", "content": filtered_response})
-                message(filtered_response)
-                if st.session_state.debug_enabled:
-                    logger.debug("Chat response processed and displayed")
+                    if st.session_state.debug_enabled:
+                        logger.debug(f"app.chat response type: {type(response_chunks).__name__}")
+                    text = ""
+                    progress_bar = st.progress(0)
+                    chunk_count = 0
+                    total_chunks_estimated = 10  # Estimate for progress bar
+                    placeholder = st.empty()  # Placeholder for streaming text
+                    st.session_state.streaming_session_id += 1
+                    session_id = st.session_state.streaming_session_id
+                    try:
+                        for chunk in st.write_stream(response_chunks):
+                            chunk_count += 1
+                            text += chunk
+                            formatted_text = format_latex_content(text)
+                            placeholder.markdown(f"**Assistant:** {formatted_text}", unsafe_allow_html=True)
+                            if st.session_state.debug_enabled:
+                                logger.debug(
+                                    f"Streamed chunk {chunk_count} at {time.time():.2f}s: "
+                                    f"'{chunk[:50]}...' (len={len(chunk)}, total_len={len(text)}, session_id={session_id})"
+                                )
+                            progress_bar.progress(min(chunk_count / total_chunks_estimated, 1.0))
+                        # Append final response with LaTeX formatting
+                        formatted_text = format_latex_content(text)
+                        st.session_state.messages.append({"role": "assistant", "content": formatted_text})
+                        save_chat_history()
+                        progress_bar.progress(1.0)
+                        st.session_state.streaming_active = False
+                        if st.session_state.debug_enabled:
+                            logger.debug(f"Streaming completed, final response: '{text[:50]}...'")
+                        st.rerun()
+                    except Exception as e:
+                        logger.error(f"Rendering error (streaming): {str(e)}")
+                        formatted_error = format_latex_content(f"Rendering error: {str(e)}")
+                        placeholder.markdown(f"**Assistant:** {formatted_error}", unsafe_allow_html=True)
+                        st.session_state.messages.append({"role": "assistant", "content": formatted_error})
+                        save_chat_history()
+                        progress_bar.progress(1.0)
+                        st.session_state.streaming_active = False
+                        st.rerun()
         except Exception as e:
-            st.error(f"Chat response error: {str(e)}")
-            logger.error(f"Chat processing error: {e}")
+            st.error(f"Chat error: {str(e)}")
+            logger.error(f"Chat error: {str(e)}")
+            formatted_error = format_latex_content(f"Chat error: {str(e)}")
+            st.session_state.messages.append({"role": "assistant", "content": formatted_error})
+            save_chat_history()
+            st.session_state.streaming_active = False
+            st.rerun()
 
 # --- Debug Information ---
 def get_debug_info():
@@ -810,6 +1367,17 @@ if st.session_state.debug_enabled and st.session_state.is_authenticated:
                 st.write(f"**Query {len(st.session_state.debug_sessions) - i}:**")
                 st.write(f"**Prompt:** {session.get('prompt', 'No prompt available')}")
                 st.write(f"**Response:** {session.get('response', 'No response available')}")
+                st.write("**Streaming Info:**")
+                streaming_info = session.get('streaming_info', {})
+                st.write(f"- Response Type: {streaming_info.get('response_type', 'Unknown')}")
+                st.write(f"- Total Chunks: {streaming_info.get('chunk_count', 0)}")
+                if streaming_info.get('chunks_received'):
+                    st.write("- Chunks Received:")
+                    for chunk_info in streaming_info['chunks_received'][:5]:  # Limit to 5 for brevity
+                        st.write(
+                            f"  - Chunk {chunk_info['chunk_number']}: '{chunk_info['content']}' "
+                            f"(len={chunk_info['length']}, time={chunk_info['timestamp']:.2f}s)"
+                        )
                 st.write("**Retrieved Documents:** Not available due to Embedchain API limitations.")
                 st.write("---")
         else:
@@ -854,14 +1422,269 @@ if st.session_state.is_authenticated:
             with st.spinner("Testing embedding..."):
                 try:
                     if not hasattr(st.session_state, 'app'):
-                        st.error("st.session_state.app is not initialized. Please restart the app.")
+                        st.session_state.messages.append({"role": "assistant", "content": "st.session_state.app is not initialized. Please restart the app."})
+                        save_chat_history()
+                        if st.session_state.debug_enabled:
+                            logger.debug("Appended message: st.session_state.app is not initialized")
+                        st.rerun()
                     else:
                         result = st.session_state.app.test_embedding(test_text)
                         if result["success"]:
-                            st.success(f"✅ Embedding successful - Dimension: {result['embedding_dimension']}")
-                            st.write("Sample of embedding vector:", result['embedding_sample'])
-                            st.write(f"Process took {result['duration']:.4f} seconds")
+                            output = (
+                                f"✅ Embedding successful - Dimension: {result['embedding_dimension']}\n"
+                                f"Sample of embedding vector: {result['embedding_sample']}\n"
+                                f"Process took {result['duration']:.4f} seconds"
+                            )
+                            formatted_output = format_latex_content(output)
+                            st.session_state.messages.append({"role": "assistant", "content": formatted_output})
+                            save_chat_history()
+                            if st.session_state.debug_enabled:
+                                logger.debug(f"Appended message: {output[:50]}...")
                         else:
-                            st.error(f"❌ Embedding failed: {result['error']}")
+                            formatted_error = format_latex_content(f"❌ Embedding failed: {result['error']}")
+                            st.session_state.messages.append({"role": "assistant", "content": formatted_error})
+                            save_chat_history()
+                            if st.session_state.debug_enabled:
+                                logger.debug(f"Appended message: Embedding failed: {result['error'][:50]}...")
+                        st.rerun()
                 except Exception as e:
-                    st.error(f"Test failed with error: {str(e)}")
+                    formatted_error = format_latex_content(f"Test failed with error: {str(e)}")
+                    st.session_state.messages.append({"role": "assistant", "content": formatted_error})
+                    save_chat_history()
+                    if st.session_state.debug_enabled:
+                        logger.debug(f"Appended message: Test failed: {str(e)[:50]}...")
+                    st.rerun()
+
+        # Minimal streaming test button
+        if st.button("Test Minimal Streaming", key="test_minimal_stream_btn"):
+            with st.spinner("Testing minimal streaming..."):
+                try:
+                    def stream_data():
+                        for word in ["Hello", "world", "this", "is", "a", "test", "with", "math", "$\\sum_{i=1}^{n} i$"]:
+                            yield word + " "
+                            time.sleep(0.5)  # Slower for visible streaming effect
+
+                    st.session_state.messages.append({"role": "user", "content": "Testing minimal streaming..."})
+                    save_chat_history()
+                    if st.session_state.debug_enabled:
+                        logger.debug("Appended message: Testing minimal streaming...")
+                    text = ""
+                    if st.session_state.use_streaming:
+                        # Streaming with st.write_stream
+                        progress_bar = st.progress(0)
+                        chunk_count = 0
+                        total_chunks_estimated = 9  # Known number of words
+                        st.session_state.streaming_session_id += 1
+                        session_id = st.session_state.streaming_session_id
+                        placeholder = st.empty()  # Placeholder for streaming text
+                        try:
+                            for chunk in st.write_stream(stream_data()):
+                                chunk_count += 1
+                                text += chunk
+                                formatted_text = format_latex_content(text)
+                                placeholder.markdown(f"**Assistant:** {formatted_text}", unsafe_allow_html=True)
+                                if st.session_state.debug_enabled:
+                                    logger.debug(
+                                        f"Streamed chunk {chunk_count} at {time.time():.2f}s: "
+                                        f"'{chunk[:50]}...' (len={len(chunk)}, total_len={len(text)}, session_id={session_id})"
+                                    )
+                                progress_bar.progress(min(chunk_count / total_chunks_estimated, 1.0))
+                            formatted_text = format_latex_content(text)
+                            st.session_state.messages.append({"role": "assistant", "content": formatted_text})
+                            st.session_state.messages.append({"role": "assistant", "content": "Minimal streaming test completed."})
+                            save_chat_history()
+                            if st.session_state.debug_enabled:
+                                logger.debug(f"Appended message: {text[:50]}...")
+                                logger.debug("Appended message: Minimal streaming test completed")
+                            progress_bar.progress(1.0)
+                            st.rerun()
+                        except Exception as e:
+                            logger.error(f"Minimal streaming error: {str(e)}")
+                            formatted_error = format_latex_content(f"Minimal streaming error: {str(e)}")
+                            placeholder.markdown(f"**Assistant:** {formatted_error}", unsafe_allow_html=True)
+                            st.session_state.messages.append({"role": "assistant", "content": formatted_error})
+                            st.session_state.messages.append({"role": "assistant", "content": "Minimal streaming test failed."})
+                            save_chat_history()
+                            if st.session_state.debug_enabled:
+                                logger.debug(f"Appended message: Minimal streaming error: {str(e)[:50]}...")
+                                logger.debug("Appended message: Minimal streaming test failed")
+                            progress_bar.progress(1.0)
+                            st.rerun()
+                    else:
+                        # Non-streaming default
+                        start_time = time.time()
+                        for chunk in stream_data():
+                            text += chunk
+                        formatted_text = format_latex_content(text)
+                        st.session_state.messages.append({"role": "assistant", "content": formatted_text})
+                        st.session_state.messages.append({"role": "assistant", "content": "Minimal streaming test completed."})
+                        save_chat_history()
+                        if st.session_state.debug_enabled:
+                            logger.debug(
+                                f"Rendered full response (non-streaming) at {time.time() - start_time:.2f}s: "
+                                f"'{text[:50]}...' (len={len(text)})"
+                            )
+                            logger.debug(f"Appended message: {text[:50]}...")
+                            logger.debug("Appended message: Minimal streaming test completed")
+                        st.rerun()
+                except Exception as e:
+                    formatted_error = format_latex_content(f"Minimal streaming test failed: {str(e)}")
+                    st.session_state.messages.append({"role": "assistant", "content": formatted_error})
+                    save_chat_history()
+                    if st.session_state.debug_enabled:
+                        logger.debug(f"Appended message: Minimal streaming test failed: {str(e)[:50]}...")
+                    st.rerun()
+
+        # New Plotting Test
+        st.subheader("📊 Plotting Test")
+        st.write("Generate a plot based on input data or mathematical functions.")
+        plot_type = st.selectbox(
+            "Select Plot Type",
+            ["Line Plot", "Bar Plot", "Scatter Plot", "Pie Chart", "Histogram", "Mathematical Function"],
+            key="plot_type_select"
+        )
+        if plot_type == "Mathematical Function":
+            function_input = st.text_input(
+                "Enter function (e.g., sin(x), x**2, cos(x))",
+                value="sin(x)",
+                key="function_input"
+            )
+            x_range = st.text_input(
+                "X range (e.g., -10,10)",
+                value="-10,10",
+                key="x_range_input"
+            )
+            num_points = st.number_input(
+                "Number of points",
+                min_value=10,
+                max_value=1000,
+                value=100,
+                key="num_points_input"
+            )
+        else:
+            data_input = st.text_area(
+                "Enter data (CSV format, e.g., label,value\\nA,10\\nB,20\\nC,25 for Pie Chart; value\\n10\\n20\\n25 for Histogram; x,y\\n1,10\\n2,20\\n3,25 for others):",
+                value="x,y\n1,10\n2,20\n3,25" if plot_type in ["Line Plot", "Bar Plot", "Scatter Plot"] else "label,value\nA,10\nB,20\nC,25" if plot_type == "Pie Chart" else "value\n10\n20\n25",
+                key="plot_data_input"
+            )
+            if plot_type == "Histogram":
+                bins = st.number_input(
+                    "Number of bins",
+                    min_value=1,
+                    max_value=100,
+                    value=10,
+                    key="bins_input"
+                )
+        plot_title = st.text_input("Plot Title", value="Sample Plot", key="plot_title_input")
+        x_label = st.text_input("X-Axis Label", value="X" if plot_type != "Pie Chart" else "", key="x_label_input")
+        y_label = st.text_input("Y-Axis Label", value="Y" if plot_type not in ["Pie Chart", "Histogram"] else "Frequency" if plot_type == "Histogram" else "", key="y_label_input")
+
+        if st.button("Generate Plot", key="generate_plot_btn"):
+            with st.spinner("Generating plot..."):
+                try:
+                    # Create figure
+                    plt.figure(figsize=(8, 6))
+                    sns.set_style("whitegrid")
+
+                    # Data for logging
+                    data_shape = None
+
+                    if plot_type == "Mathematical Function":
+                        # Parse x range
+                        try:
+                            x_min, x_max = map(float, x_range.split(','))
+                        except ValueError:
+                            raise ValueError("Invalid x range format. Use 'min,max' (e.g., -10,10).")
+                        x = np.linspace(x_min, x_max, int(num_points))
+                        # Evaluate function
+                        try:
+                            # Safely evaluate the function
+                            func = eval(f"lambda x: {function_input}", {"np": np, "sin": np.sin, "cos": np.cos, "tan": np.tan, "exp": np.exp, "log": np.log})
+                            y = func(x)
+                        except Exception as e:
+                            raise ValueError(f"Invalid function: {str(e)}")
+                        # Plot
+                        plt.plot(x, y, linewidth=2)
+                        data_shape = (len(x),)
+                    else:
+                        # Parse CSV input
+                        df = pd.read_csv(StringIO(data_input))
+                        if plot_type == "Pie Chart":
+                            if df.empty or len(df.columns) < 2:
+                                raise ValueError("Invalid data format. Please provide two columns (label, value).")
+                            labels, values = df.columns[0], df.columns[1]
+                            if not all(df[values].apply(lambda x: isinstance(x, (int, float)) and x >= 0)):
+                                raise ValueError("Values for Pie Chart must be non-negative numbers.")
+                            plt.pie(df[values], labels=df[labels], autopct='%1.1f%%', startangle=140)
+                            data_shape = df.shape
+                        elif plot_type == "Histogram":
+                            if df.empty or len(df.columns) < 1:
+                                raise ValueError("Invalid data format. Please provide at least one column (value).")
+                            values = df[df.columns[0]]
+                            if not all(values.apply(lambda x: isinstance(x, (int, float)))):
+                                raise ValueError("Values for Histogram must be numbers.")
+                            plt.hist(values, bins=int(bins), edgecolor='black')
+                            data_shape = (len(values),)
+                        else:
+                            if df.empty or len(df.columns) < 2:
+                                raise ValueError("Invalid data format. Please provide at least two columns (x, y).")
+                            x_col, y_col = df.columns[0], df.columns[1]
+                            x_data, y_data = df[x_col], df[y_col]
+                            if not all(df[x_col].apply(lambda x: isinstance(x, (int, float))) and df[y_col].apply(lambda x: isinstance(x, (int, float)))):
+                                raise ValueError("X and Y values must be numbers.")
+                            if plot_type == "Line Plot":
+                                plt.plot(x_data, y_data, marker='o', linestyle='-', linewidth=2, markersize=8)
+                            elif plot_type == "Bar Plot":
+                                plt.bar(x_data, y_data, color='skyblue', edgecolor='black')
+                            elif plot_type == "Scatter Plot":
+                                plt.scatter(x_data, y_data, s=100, c='red', edgecolors='black')
+                            data_shape = df.shape
+
+                    # Customize plot
+                    if plot_type != "Pie Chart":
+                        plt.title(plot_title, fontsize=14, pad=10)
+                        plt.xlabel(x_label, fontsize=12)
+                        plt.ylabel(y_label, fontsize=12)
+                        plt.grid(True)
+                    else:
+                        plt.title(plot_title, fontsize=14, pad=10)
+                    plt.tight_layout()
+
+                    # Save plot to a BytesIO buffer
+                    buffer = BytesIO()
+                    plt.savefig(buffer, format='png', dpi=100)
+                    buffer.seek(0)
+                    img_data = buffer.getvalue()
+                    img_base64 = base64.b64encode(img_data).decode('utf-8')
+                    img_str = f"data:image/png;base64,{img_base64}"
+
+                    # Append to chat history
+                    output = f"✅ Plot generated successfully: {plot_type} with title '{plot_title}'"
+                    formatted_output = format_latex_content(output)
+                    st.session_state.messages.append({"role": "assistant", "content": formatted_output})
+                    st.session_state.messages.append({"role": "assistant", "content": img_str})
+                    save_chat_history()
+                    if st.session_state.debug_enabled:
+                        logger.debug(f"Plot generated: {plot_type}, data shape: {data_shape}")
+                        logger.debug(f"Appended message: {output[:50]}...")
+                        logger.debug(f"Appended plot image (base64 length: {len(img_str)})")
+
+                    # Clean up
+                    plt.close()
+                    buffer.close()
+
+                    # Rerun to refresh the chat window
+                    st.rerun()
+
+                except Exception as e:
+                    formatted_error = format_latex_content(f"❌ Plot generation failed: {str(e)}")
+                    st.session_state.messages.append({"role": "assistant", "content": formatted_error})
+                    save_chat_history()
+                    if st.session_state.debug_enabled:
+                        logger.debug(f"Plot generation failed: {str(e)}")
+                        logger.debug(f"Appended message: Plot generation failed: {str(e)[:50]}...")
+                    st.error(f"Plot generation failed: {str(e)}")
+                    if 'plt' in locals():
+                        plt.close()
+                    # Rerun to show the error message
+                    st.rerun()
