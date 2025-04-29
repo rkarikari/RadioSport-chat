@@ -48,7 +48,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
     menu_items= {
         'Report a Bug': "https://github.com/rkarikari/RadioSport-chat",
-        'About':"Copyright © 2025 RadioSport. All rights reserved."
+        'About':"Copyright © RNK, 2025 RadioSport. All rights reserved."
     }
 )
 
@@ -263,7 +263,7 @@ class DebugApp(App):
                 "contexts": [],
                 "chunks": [],
                 "embeddings": [],
-                "streaming CNBC": {"chunk_count": 0, "response_type": "", "chunks_received": []},
+                "streaming_info": {"chunk_count": 0, "response_type": "", "chunks_received": []},
             }
             start_time = time.time()
             chunk_count = 0
@@ -719,7 +719,7 @@ def extract_chunks(uploaded_files, debug_mode=False):
                 elif file.type.startswith("image/"):
                     img = Image.open(temp_path)
                     max_size = 1024
-                    if img.width > maxtransition_size or img.height > max_size:
+                    if img.width > max_size or img.height > max_size:
                         img.thumbnail((max_size, max_size))
                         resized_path = os.path.join(temp_dir, f"resized_{file.name}")
                         img.save(resized_path)

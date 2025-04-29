@@ -14,7 +14,7 @@ import streamlit as st
 from streamlit_chat import message
 from PIL import Image
 import pytesseract
-from io import BytesIO
+from io import BytesIO, StringIO
 import numpy as np
 import concurrent.futures
 import pdfplumber
@@ -27,8 +27,13 @@ import uuid
 import types  # For generator detection
 import hashlib  # For generating embedding IDs
 
+import matplotlib.pyplot as plt # For plotting
+import seaborn as sns # For data visualization
+import pandas as pd # For data manipulation
+
+
 # Version tracking
-APP_VERSION = "v1.0.1.5"
+APP_VERSION = "v2.0.0.3"
 
 # Uncomment and update if Tesseract is not in PATH
 # pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
@@ -41,6 +46,10 @@ st.set_page_config(
     page_icon="🧟",
     layout="centered",
     initial_sidebar_state="collapsed",
+    menu_items= {
+        'Report a Bug': "https://github.com/rkarikari/RadioSport-chat",
+        'About':"Copyright © RNK, 2025 RadioSport. All rights reserved."
+    }
 )
 
 # Include MathJax for LaTeX rendering (offline configuration)
@@ -1165,13 +1174,13 @@ for i, msg in enumerate(st.session_state.messages):
     if msg["role"] == "user":
         safe_message(msg["content"], is_user=True, key=str(i))
     else:
-        # Assistant messages with bold "Assistant:" and LaTeX formatting
+        # Assistant messages
         content = msg["content"]
         if isinstance(content, types.GeneratorType):
             if st.session_state.debug_enabled:
                 logger.warning("Generator object detected in assistant message content, converting to string")
             try:
-                content = particul.join(content)
+                content = "".join(content)
             except Exception as e:
                 content = f"Error consuming generator: {str(e)}"
                 logger.error(f"Failed to consume generator in assistant message: {str(e)}")
@@ -1180,11 +1189,16 @@ for i, msg in enumerate(st.session_state.messages):
                 logger.warning(f"Non-string content type {type(content)} in assistant message, converting to string")
             content = str(content)
         try:
-            formatted_content = format_latex_content(content)
-            st.markdown(f"**Assistant:** {formatted_content}", unsafe_allow_html=True)
+            # Check if the content is a base64-encoded image
+            if content.startswith("data:image/png;base64,"):
+                st.image(content, use_container_width=True)
+            else:
+                # Handle text with LaTeX formatting
+                formatted_content = format_latex_content(content)
+                st.markdown(f"**Assistant:** {formatted_content}", unsafe_allow_html=True)
         except Exception as e:
-            logger.error(f"Failed to render LaTeX for assistant message: {str(e)}")
-            st.markdown(f"**Assistant:** {content} (LaTeX rendering failed: {str(e)})", unsafe_allow_html=True)
+            logger.error(f"Failed to render assistant message: {str(e)}")
+            st.markdown(f"**Assistant:** {content} (Rendering failed: {str(e)})", unsafe_allow_html=True)
 
 col1, col2 = st.columns([1, 1])
 
@@ -1260,7 +1274,7 @@ if prompt:
                                 )
                             progress_bar.progress(min(chunk_count / total_chunks_estimated, 1.0))
                         # Append final response with LaTeX formatting
-                        formatted_text = format_latex_content(text)
+                            formatted_text = format_latex_content(text)
                         st.session_state.messages.append({"role": "assistant", "content": formatted_text})
                         save_chat_history()
                         progress_bar.progress(1.0)
@@ -1434,7 +1448,7 @@ if st.session_state.is_authenticated:
                                 logger.debug(f"Appended message: Embedding failed: {result['error'][:50]}...")
                         st.rerun()
                 except Exception as e:
-                    formatted_error = format_latex_content(f"Test failed with error solemne: {str(e)}")
+                    formatted_error = format_latex_content(f"Test failed with error: {str(e)}")
                     st.session_state.messages.append({"role": "assistant", "content": formatted_error})
                     save_chat_history()
                     if st.session_state.debug_enabled:
@@ -1519,4 +1533,158 @@ if st.session_state.is_authenticated:
                     save_chat_history()
                     if st.session_state.debug_enabled:
                         logger.debug(f"Appended message: Minimal streaming test failed: {str(e)[:50]}...")
+                    st.rerun()
+
+        # New Plotting Test
+        st.subheader("📊 Plotting Test")
+        st.write("Generate a plot based on input data or mathematical functions.")
+        plot_type = st.selectbox(
+            "Select Plot Type",
+            ["Line Plot", "Bar Plot", "Scatter Plot", "Pie Chart", "Histogram", "Mathematical Function"],
+            key="plot_type_select"
+        )
+        if plot_type == "Mathematical Function":
+            function_input = st.text_input(
+                "Enter function (e.g., sin(x), x**2, cos(x))",
+                value="sin(x)",
+                key="function_input"
+            )
+            x_range = st.text_input(
+                "X range (e.g., -10,10)",
+                value="-10,10",
+                key="x_range_input"
+            )
+            num_points = st.number_input(
+                "Number of points",
+                min_value=10,
+                max_value=1000,
+                value=100,
+                key="num_points_input"
+            )
+        else:
+            data_input = st.text_area(
+                "Enter data (CSV format, e.g., label,value\\nA,10\\nB,20\\nC,25 for Pie Chart; value\\n10\\n20\\n25 for Histogram; x,y\\n1,10\\n2,20\\n3,25 for others):",
+                value="x,y\n1,10\n2,20\n3,25" if plot_type in ["Line Plot", "Bar Plot", "Scatter Plot"] else "label,value\nA,10\nB,20\nC,25" if plot_type == "Pie Chart" else "value\n10\n20\n25",
+                key="plot_data_input"
+            )
+            if plot_type == "Histogram":
+                bins = st.number_input(
+                    "Number of bins",
+                    min_value=1,
+                    max_value=100,
+                    value=10,
+                    key="bins_input"
+                )
+        plot_title = st.text_input("Plot Title", value="Sample Plot", key="plot_title_input")
+        x_label = st.text_input("X-Axis Label", value="X" if plot_type != "Pie Chart" else "", key="x_label_input")
+        y_label = st.text_input("Y-Axis Label", value="Y" if plot_type not in ["Pie Chart", "Histogram"] else "Frequency" if plot_type == "Histogram" else "", key="y_label_input")
+
+        if st.button("Generate Plot", key="generate_plot_btn"):
+            with st.spinner("Generating plot..."):
+                try:
+                    # Create figure
+                    plt.figure(figsize=(8, 6))
+                    sns.set_style("whitegrid")
+
+                    # Data for logging
+                    data_shape = None
+
+                    if plot_type == "Mathematical Function":
+                        # Parse x range
+                        try:
+                            x_min, x_max = map(float, x_range.split(','))
+                        except ValueError:
+                            raise ValueError("Invalid x range format. Use 'min,max' (e.g., -10,10).")
+                        x = np.linspace(x_min, x_max, int(num_points))
+                        # Evaluate function
+                        try:
+                            # Safely evaluate the function
+                            func = eval(f"lambda x: {function_input}", {"np": np, "sin": np.sin, "cos": np.cos, "tan": np.tan, "exp": np.exp, "log": np.log})
+                            y = func(x)
+                        except Exception as e:
+                            raise ValueError(f"Invalid function: {str(e)}")
+                        # Plot
+                        plt.plot(x, y, linewidth=2)
+                        data_shape = (len(x),)
+                    else:
+                        # Parse CSV input
+                        df = pd.read_csv(StringIO(data_input))
+                        if plot_type == "Pie Chart":
+                            if df.empty or len(df.columns) < 2:
+                                raise ValueError("Invalid data format. Please provide two columns (label, value).")
+                            labels, values = df.columns[0], df.columns[1]
+                            if not all(df[values].apply(lambda x: isinstance(x, (int, float)) and x >= 0)):
+                                raise ValueError("Values for Pie Chart must be non-negative numbers.")
+                            plt.pie(df[values], labels=df[labels], autopct='%1.1f%%', startangle=140)
+                            data_shape = df.shape
+                        elif plot_type == "Histogram":
+                            if df.empty or len(df.columns) < 1:
+                                raise ValueError("Invalid data format. Please provide at least one column (value).")
+                            values = df[df.columns[0]]
+                            if not all(values.apply(lambda x: isinstance(x, (int, float)))):
+                                raise ValueError("Values for Histogram must be numbers.")
+                            plt.hist(values, bins=int(bins), edgecolor='black')
+                            data_shape = (len(values),)
+                        else:
+                            if df.empty or len(df.columns) < 2:
+                                raise ValueError("Invalid data format. Please provide at least two columns (x, y).")
+                            x_col, y_col = df.columns[0], df.columns[1]
+                            x_data, y_data = df[x_col], df[y_col]
+                            if not all(df[x_col].apply(lambda x: isinstance(x, (int, float))) and df[y_col].apply(lambda x: isinstance(x, (int, float)))):
+                                raise ValueError("X and Y values must be numbers.")
+                            if plot_type == "Line Plot":
+                                plt.plot(x_data, y_data, marker='o', linestyle='-', linewidth=2, markersize=8)
+                            elif plot_type == "Bar Plot":
+                                plt.bar(x_data, y_data, color='skyblue', edgecolor='black')
+                            elif plot_type == "Scatter Plot":
+                                plt.scatter(x_data, y_data, s=100, c='red', edgecolors='black')
+                            data_shape = df.shape
+
+                    # Customize plot
+                    if plot_type != "Pie Chart":
+                        plt.title(plot_title, fontsize=14, pad=10)
+                        plt.xlabel(x_label, fontsize=12)
+                        plt.ylabel(y_label, fontsize=12)
+                        plt.grid(True)
+                    else:
+                        plt.title(plot_title, fontsize=14, pad=10)
+                    plt.tight_layout()
+
+                    # Save plot to a BytesIO buffer
+                    buffer = BytesIO()
+                    plt.savefig(buffer, format='png', dpi=100)
+                    buffer.seek(0)
+                    img_data = buffer.getvalue()
+                    img_base64 = base64.b64encode(img_data).decode('utf-8')
+                    img_str = f"data:image/png;base64,{img_base64}"
+
+                    # Append to chat history
+                    output = f"✅ Plot generated successfully: {plot_type} with title '{plot_title}'"
+                    formatted_output = format_latex_content(output)
+                    st.session_state.messages.append({"role": "assistant", "content": formatted_output})
+                    st.session_state.messages.append({"role": "assistant", "content": img_str})
+                    save_chat_history()
+                    if st.session_state.debug_enabled:
+                        logger.debug(f"Plot generated: {plot_type}, data shape: {data_shape}")
+                        logger.debug(f"Appended message: {output[:50]}...")
+                        logger.debug(f"Appended plot image (base64 length: {len(img_str)})")
+
+                    # Clean up
+                    plt.close()
+                    buffer.close()
+
+                    # Rerun to refresh the chat window
+                    st.rerun()
+
+                except Exception as e:
+                    formatted_error = format_latex_content(f"❌ Plot generation failed: {str(e)}")
+                    st.session_state.messages.append({"role": "assistant", "content": formatted_error})
+                    save_chat_history()
+                    if st.session_state.debug_enabled:
+                        logger.debug(f"Plot generation failed: {str(e)}")
+                        logger.debug(f"Appended message: Plot generation failed: {str(e)[:50]}...")
+                    st.error(f"Plot generation failed: {str(e)}")
+                    if 'plt' in locals():
+                        plt.close()
+                    # Rerun to show the error message
                     st.rerun()
