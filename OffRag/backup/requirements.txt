@@ -1,0 +1,17 @@
+streamlit
+streamlit-chat
+embedchain
+chromadb
+tenacity
+pdfplumber
+pillow
+pytesseract
+bcrypt
+requests
+packaging
+numpy
+matplotlib
+seaborn
+pandas
+
+speechrecognition
