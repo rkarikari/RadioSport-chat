@@ -1006,7 +1006,7 @@ reasoning_window_css = """
 st.markdown(reasoning_window_css, unsafe_allow_html=True)
 
 # Main chat interface
-st.title("RadioSport RAG Chat")
+st.title("RadioSport Chat")
 st.markdown(f"Version {VERSION}")
 
 # Floating window placeholder (separate from chat container)
