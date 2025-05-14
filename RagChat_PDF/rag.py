@@ -17,6 +17,17 @@ import logging
 import warnings
 import sys
 
+# Set page configuration
+st.set_page_config(
+    page_title="RadioSport Chat",
+    page_icon="🧟",
+    layout="centered",
+    menu_items={
+        'Report a Bug': "https://github.com/rkarikari/RadioSport-chat",
+        'About': "Copyright © RNK, 2025 RadioSport. All rights reserved."
+    }
+)
+
 # Suppress pdfplumber logs and warnings
 logging.getLogger("pdfplumber").setLevel(logging.ERROR)
 warnings.filterwarnings("ignore", category=UserWarning, module="pdfplumber")
@@ -35,7 +46,7 @@ class StderrFilter:
         self.original_stderr.flush()
 
 # Version and Changelog
-VERSION = "v2.4.13"
+VERSION = "v2.5.0"
 CHANGELOG = """
 Changelog:
 - v2.2.0 (2025-05-09): Base version with model selection, LaTeX in expander, separate LLM/embedding models, and chat history context.
@@ -73,6 +84,8 @@ Changelog:
 - v2.4.11 (2025-05-14): Added stderr filtering to suppress CropBox warnings during PDF processing, added debug logging for PDF page count.
 - v2.4.12 (2025-05-14): Replaced deprecated `run` with `invoke` for RAG mode to address LangChain deprecation warning, moved pdfplumber logging to function to run once, added file deduplication to prevent repeated PDF processing.
 - v2.4.13 (2025-05-14): Removed all unnecessary logging, including pdfplumber logging level print and PDF processing debug prints, to streamline console output and improve performance.
+- v2.4.14 (2025-05-14): Added custom CSS to reduce top padding, shifting the title "RadioSport Chat" higher on the screen.
+- v2.5.0 (2025-05-14): Added st.set_page_config with custom page title, zombie icon, centered layout, and menu items for bug reporting and about info.
 """
 
 # Function to compute file hash
@@ -590,7 +603,7 @@ with st.sidebar:
                     data_cols = st.multiselect("Select data columns", columns, key="box_data")
                 except Exception as e:
                     st.error(f"Error reading CSV file: {str(e)}")
-                    df = None
+                df = None
             else:
                 df = None
                 st.warning("Please upload a CSV file.")
@@ -603,7 +616,7 @@ with st.sidebar:
                     data_cols = st.multiselect("Select data columns", columns, key="violin_data")
                 except Exception as e:
                     st.error(f"Error reading CSV file: {str(e)}")
-                    df = None
+                df = None
             else:
                 df = None
                 st.warning("Please upload a CSV file.")
@@ -919,7 +932,7 @@ with st.sidebar:
                         x = [float(x) for x in x_points.split(",") if x.strip()]
                         y = [float(y) for y in y_points.split(",") if y.strip()]
                         y_err = [float(e) for e in y_err.split(",") if e.strip()]
-                        if not (len(x) == len(y) == len(y_err)):
+                        if not ( len(x) == len(y) == len(y_err)):
                             raise ValueError("X, Y, and error values must have the same number of points")
                     else:
                         if not df:
@@ -1004,6 +1017,16 @@ reasoning_window_css = """
 </style>
 """
 st.markdown(reasoning_window_css, unsafe_allow_html=True)
+
+# Inject CSS to reduce top padding for title
+title_position_css = """
+<style>
+.stApp {
+    padding-top: 0px !important;
+}
+</style>
+"""
+st.markdown(title_position_css, unsafe_allow_html=True)
 
 # Main chat interface
 st.title("RadioSport Chat")

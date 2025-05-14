@@ -1,6 +1,6 @@
 # RadioSport Chat (rag.py)
 
-**Version**: v2.4.13 (2025-05-14)
+**Version**: v2.5.0 (2025-05-14)
 
 RadioSport Chat is a Streamlit-based web application that provides an interactive chat interface powered by Ollama models. It supports Retrieval-Augmented Generation (RAG) for answering questions based on uploaded PDF documents and a direct model mode for general queries. The app also includes advanced graphing capabilities, LaTeX rendering, and a clean, efficient interface optimized for performance.
 
@@ -68,7 +68,7 @@ RadioSport Chat is a Streamlit-based web application that provides an interactiv
 ## Installation Notes
 
 ### Prerequisites
-- **Python**: Version 3.9 or later.
+- **Python**: Version 3.11 or later.
   ```bash
   python --version
   ```
