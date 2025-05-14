@@ -1,0 +1,203 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polynomial Graph</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
+        }
+        .graph {
+            background-color: white;
+            border: 1px solid #ccc;
+            padding: 10px;
+            box-shadow: 0 0 5px rgba(0,0,0,0.1);
+        }
+        .controls {
+            margin: 20px 0;
+            text-align: center;
+        }
+        label {
+            margin: 0 10px;
+        }
+        input[type="range"] {
+            width: 150px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Polynomial Graph: ax² + bx + c</h1>
+    <div class="controls">
+        <label>a: <span id="a-value">0</span>
+            <input type="range" id="a" min="-4" max="4" step="0.1" value="0">
+        </label>
+        <label>b: <span id="b-value">0</span>
+            <input type="range" id="b" min="-4" max="4" step="0.1" value="0">
+        </label>
+        <label>c: <span id="c-value">0</span>
+            <input type="range" id="c" min="-4" max="4" step="0.1" value="0">
+        </label>
+    </div>
+    <div class="container">
+        <svg id="graph" class="graph" width="400" height="400"></svg>
+    </div>
+
+    <script>
+        const svg = document.getElementById('graph');
+        const aInput = document.getElementById('a');
+        const bInput = document.getElementById('b');
+        const cInput = document.getElementById('c');
+        const aValue = document.getElementById('a-value');
+        const bValue = document.getElementById('b-value');
+        const cValue = document.getElementById('c-value');
+
+        function drawGraph() {
+            const a = parseFloat(aInput.value);
+            const b = parseFloat(bInput.value);
+            const c = parseFloat(cInput.value);
+
+            aValue.textContent = a.toFixed(1);
+            bValue.textContent = b.toFixed(1);
+            cValue.textContent = c.toFixed(1);
+
+            // Clear SVG
+            svg.innerHTML = '';
+
+            // Define SVG dimensions and scales
+            const width = 400;
+            const height = 400;
+            const xMin = -10;
+            const xMax = 10;
+            const yMin = -20;
+            const yMax = 20;
+
+            // Scales
+            const xScale = width / (xMax - xMin);
+            const yScale = height / (yMax - yMin);
+
+            // Draw axes
+            const xAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            xAxis.setAttribute('x1', 0);
+            xAxis.setAttribute('y1', height / 2);
+            xAxis.setAttribute('x2', width);
+            xAxis.setAttribute('y2', height / 2);
+            xAxis.setAttribute('stroke', 'black');
+            svg.appendChild(xAxis);
+
+            const yAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            yAxis.setAttribute('x1', width / 2);
+            yAxis.setAttribute('y1', 0);
+            yAxis.setAttribute('x2', width / 2);
+            yAxis.setAttribute('y2', height);
+            yAxis.setAttribute('stroke', 'black');
+            svg.appendChild(yAxis);
+
+            // Generate polynomial points
+            const points = [];
+            for (let x = xMin; x <= xMax; x += 0.1) {
+                const y = a * x * x + b * x + c;
+                const svgX = (x - xMin) * xScale;
+                const svgY = height - (y - yMin) * yScale;
+                points.push(`${svgX},${svgY}`);
+            }
+
+            // Draw polynomial
+            const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+            polyline.setAttribute('points', points.join(' '));
+            polyline.setAttribute('fill', 'none');
+            polyline.setAttribute('stroke', 'blue');
+            polyline.setAttribute('stroke-width', '2');
+            svg.appendChild(polyline);
+
+            // Add grid lines
+            for (let x = xMin; x <= xMax; x += 1) {
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', (x - xMin) * xScale);
+                line.setAttribute('y1', 0);
+                line.setAttribute('x2', (x - xMin) * xScale);
+                line.setAttribute('y2', height);
+                line.setAttribute('stroke', '#ddd');
+                line.setAttribute('stroke-width', '0.5');
+                svg.appendChild(line);
+            }
+            for (let y = yMin; y <= yMax; y += 1) {
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', 0);
+                line.setAttribute('y1', height - (y - yMin) * yScale);
+                line.setAttribute('x2', width);
+                line.setAttribute('y2', height - (y - yMin) * yScale);
+                line.setAttribute('stroke', '#ddd');
+                line.setAttribute('stroke-width', '0.5');
+                svg.appendChild(line);
+            }
+        }
+
+        // Event listeners
+        aInput.addEventListener('input', drawGraph);
+        bInput.addEventListener('input', drawGraph);
+        cInput.addEventListener('input', drawGraph);
+
+        // Initial draw
+        drawGraph();
+    </script>
+</body>
+</html>
+<!-- Polynomial curve -->
+<!-- polynomial graph -->
+<!-- polynomial -->
+<!-- generate a single page html file showing a -->
+<!-- polynomial graph `a*x** +b*x + c`, (generated svg images) -->
+<!-- with the effects of the coefficients changing from -4 to 4. -->
+<!-- All code must be contained in a single file. -->
