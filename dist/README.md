@@ -320,4 +320,4 @@ Before running `setup.bat`, ensure the following:
 This script is provided as-is for use with RadioSportChat. No warranty is implied. Use at your own risk.
 
 ---
-*Generated on May 16, 2025*
+*... May 16, 2025*
