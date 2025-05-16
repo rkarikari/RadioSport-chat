@@ -1,0 +1,8 @@
+streamlit
+langchain-ollama
+langchain-community
+faiss-cpu
+pdfplumber
+matplotlib
+numpy
+pandas
