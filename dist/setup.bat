@@ -109,8 +109,8 @@ if !PYTHON_INSTALLED! equ 0 (
 )
 if !PYTHON_INSTALLED! equ 0 (
     echo [%TIME%] Checking for Python installer... | tee -a "%LOG_FILE%"
-    if not exist "D:\dist\python-3.11.9-amd64.exe" (
-        echo [%TIME%] Error: Python installer not found at D:\dist\python-3.11.9-amd64.exe. Press any key to exit... | tee -a "%LOG_FILE%"
+    if not exist "%SCRIPT_DIR%python-3.11.9-amd64.exe" (
+        echo [%TIME%] Error: Python installer not found at %SCRIPT_DIR%python-3.11.9-amd64.exe. Press any key to exit... | tee -a "%LOG_FILE%"
         pause >nul
         exit /b 1
     )
@@ -122,7 +122,7 @@ if !PYTHON_INSTALLED! equ 0 (
         exit /b 1
     )
     set "START_TIME=%TIME%"
-    start /wait D:\dist\python-3.11.9-amd64.exe /quiet InstallAllUsers=1 TargetDir=C:\Python PrependPath=1
+    start /wait %SCRIPT_DIR%python-3.11.9-amd64.exe /quiet InstallAllUsers=1 TargetDir=C:\Python PrependPath=1
     set "END_TIME=%TIME%"
     if !ERRORLEVEL! neq 0 (
         echo [%TIME%] Error: Failed to install Python 3.11. Check installer logs and press any key to exit... | tee -a "%LOG_FILE%"
@@ -178,30 +178,30 @@ echo [%TIME%] Virtual environment setup completed. | tee -a "%LOG_FILE%"
 
 :: Install pip packages
 echo === Installing Pip Packages === | tee -a "%LOG_FILE%"
-if not exist "D:\dist\venv" (
-    echo [%TIME%] Error: Package directory D:\dist\venv not found. Press any key to exit... | tee -a "%LOG_FILE%"
+if not exist "%SCRIPT_DIR%venv" (
+    echo [%TIME%] Error: Package directory %SCRIPT_DIR%venv not found. Press any key to exit... | tee -a "%LOG_FILE%"
     pause >nul
     exit /b 1
 )
-if not exist "D:\dist\venv\requirements.txt" (
-    echo [%TIME%] Error: requirements.txt not found at D:\dist\venv. Press any key to exit... | tee -a "%LOG_FILE%"
+if not exist "%SCRIPT_DIR%venv\requirements.txt" (
+    echo [%TIME%] Error: requirements.txt not found at %SCRIPT_DIR%venv\requirements.txt. Press any key to exit... | tee -a "%LOG_FILE%"
     pause >nul
     exit /b 1
 )
 set "PACKAGE_FOUND=0"
-for %%f in ("D:\dist\venv\streamlit*.whl" "D:\dist\venv\streamlit*.tar.gz") do (
+for %%f in ("%SCRIPT_DIR%venv\streamlit*.whl" "%SCRIPT_DIR%venv\streamlit*.tar.gz") do (
     set "PACKAGE_FOUND=1"
 )
 if !PACKAGE_FOUND! equ 0 (
-    echo [%TIME%] Warning: No streamlit package files found in D:\dist\venv. Installation may fail. | tee -a "%LOG_FILE%"
+    echo [%TIME%] Warning: No streamlit package files found in %SCRIPT_DIR%venv. Installation may fail. | tee -a "%LOG_FILE%"
 )
-echo [%TIME%] Installing pip packages from D:\dist\venv... | tee -a "%LOG_FILE%"
+echo [%TIME%] Installing pip packages from %SCRIPT_DIR%venv... | tee -a "%LOG_FILE%"
 call "%VENV_DIR%\Scripts\activate.bat"
 set "START_TIME=%TIME%"
 echo [%TIME%] Processing package installation... | tee -a "%LOG_FILE%"
-pip install --no-index --find-links=D:\dist\venv -r D:\dist\venv\requirements.txt >nul
+pip install --no-index --find-links=%SCRIPT_DIR%venv -r %SCRIPT_DIR%venv\requirements.txt >nul
 if !ERRORLEVEL! neq 0 (
-    echo [%TIME%] Error: Failed to install pip packages. Check D:\dist\venv and press any key to exit... | tee -a "%LOG_FILE%"
+    echo [%TIME%] Error: Failed to install pip packages. Check %SCRIPT_DIR%venv and press any key to exit... | tee -a "%LOG_FILE%"
     call "%VENV_DIR%\Scripts\deactivate.bat"
     pause >nul
     exit /b 1
@@ -243,12 +243,12 @@ if exist "C:\Program Files\Ollama\ollama.exe" (
 )
 if !OLLAMA_INSTALLED! equ 0 (
     echo [%TIME%] Checking for local Ollama installer... | tee -a "%LOG_FILE%"
-    if exist OllamaSetup.exe (
+    if exist "%SCRIPT_DIR%OllamaSetup.exe" (
         echo [%TIME%] Using local copy of OllamaSetup.exe... | tee -a "%LOG_FILE%"
     ) else (
         echo [%TIME%] Downloading OllamaSetup.exe... | tee -a "%LOG_FILE%"
         set "START_TIME=%TIME%"
-        curl -L https://ollama.com/download/OllamaSetup.exe -o OllamaSetup.exe
+        curl -L https://ollama.com/download/OllamaSetup.exe -o %SCRIPT_DIR%OllamaSetup.exe
         set "END_TIME=%TIME%"
         if !ERRORLEVEL! neq 0 (
             echo [%TIME%] Error: Failed to download OllamaSetup.exe. Check network and press any key to exit... | tee -a "%LOG_FILE%"
@@ -258,7 +258,7 @@ if !OLLAMA_INSTALLED! equ 0 (
     )
     echo [%TIME%] Installing Ollama... | tee -a "%LOG_FILE%"
     set "START_TIME=%TIME%"
-    start /wait OllamaSetup.exe
+    start /wait %SCRIPT_DIR%OllamaSetup.exe
     set "END_TIME=%TIME%"
     if !ERRORLEVEL! neq 0 (
         echo [%TIME%] Warning: Ollama installation may have failed. Check installer logs. | tee -a "%LOG_FILE%"
@@ -425,13 +425,13 @@ if !ERRORLEVEL! neq 0 (
 )
 echo [%TIME%] Checking for local Ollama model files... | tee -a "%LOG_FILE%"
 set "MODEL_FILES_FOUND=0"
-for %%f in (sha256-*) do (
+for %%f in (%SCRIPT_DIR%sha256-*) do (
     set "MODEL_FILES_FOUND=1"
 )
 if !MODEL_FILES_FOUND! equ 1 (
     echo [%TIME%] Copying local model files to !MODEL_STORAGE_DIR!... | tee -a "%LOG_FILE%"
     set "START_TIME=%TIME%"
-    copy sha256-* "!MODEL_STORAGE_DIR!\" >nul
+    copy %SCRIPT_DIR%sha256-* "!MODEL_STORAGE_DIR!\" >nul
     set "END_TIME=%TIME%"
     if !ERRORLEVEL! neq 0 (
         echo [%TIME%] Warning: Failed to copy model files to !MODEL_STORAGE_DIR!. Check disk space or permissions. | tee -a "%LOG_FILE%"
