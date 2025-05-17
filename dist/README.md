@@ -1,13 +1,13 @@
-# RadioSportChat Setup Script
+# RadioSportChat AutoInstaller
 
 ## Overview
 
-The `setup.bat` script automates the installation and configuration of **RadioSportChat**, a chat application powered by Ollama models. It installs dependencies, sets up a virtual environment, verifies model storage, and ensures all required components are properly configured on a Windows system. The script provides minimal console output (section headers, errors, prompts, and success messages) and logs all actions to `setup.log` for troubleshooting. All required files are located in the script's directory or its `venv` subfolder.
+The `AutoInstall.exe` program automates the installation and configuration of **RadioSportChat**, a chat application powered by Ollama models. It installs dependencies, sets up a virtual environment, verifies model storage, and ensures all required components are properly configured on a Windows system. The program provides minimal console output (section headers, errors, prompts, and success messages) and logs all actions to `setup.log` for troubleshooting. All required files are located in the program's directory or its `venv` subfolder.
 
 ### Key Features
 - Installs RadioSportChat, Python 3.11, and Ollama (if not already installed).
 - Creates and configures a virtual environment at `C:\venv`.
-- Installs pip packages from `venv\requirements.txt` in the script's directory, logging errors to `setup.log` and showing only the success message in the console. Note: Some pip messages (e.g., `processed file`) may appear in the console due to stderr output.
+- Installs pip packages from `venv\requirements.txt` in the program's directory, logging errors to `setup.log` and showing only the success message in the console. Note: Some pip messages (e.g., `processed file`) may appear in the console due to stderr output.
 - Verifies and configures Ollama model storage (default: `C:\Users\%USERNAME%\.ollama\models\blobs`).
 - Copies `sha256-*` model files and pulls required models (`granite3.3:2b`, `nomic-embed-text:latest`, `qwen3:4b`, `qwen3:1.7b`).
 - Performs `ollama list` checks to verify model recognition before and after copying/pulling.
@@ -22,7 +22,7 @@ The `setup.bat` script automates the installation and configuration of **RadioSp
   - If not found, runs `ollama serve`.
 - Updates system PATH with `C:\venv\Scripts` and either `C:\Program Files\Ollama` or `C:\Users\%USERNAME%\AppData\Local\Programs\Ollama` (if `ollama.exe` exists, avoiding invalid paths).
 - Sanitizes `%TIME%` into `%TIMESTAMP%` (e.g., `17_57_23_45`) to handle locale-specific formats and avoid parsing errors.
-- Validates `%LOG_FILE%` (default: `setup.log` in script directory) and falls back to `%TEMP%\setup.log` if the directory is unwritable.
+- Validates `%LOG_FILE%` (default: `setup.log` in program directory) and falls back to `%TEMP%\setup.log` if the directory is unwritable.
 - Provides console output for:
   - Section headers (e.g., `Starting Ollama Installation...`).
   - Errors (e.g., `Error: Failed to install Python...`).
@@ -32,18 +32,18 @@ The `setup.bat` script automates the installation and configuration of **RadioSp
 
 ## Prerequisites
 
-Before running `setup.bat`, ensure the following:
+Before running `AutoInstall.exe`, ensure the following:
 
 - **Operating System**: Windows 10 or later.
-- **Administrative Privileges**: Run the script as Administrator.
-- **Installer Files** (all in the same directory as `setup.bat`):
+- **Administrative Privileges**: Run the program as Administrator.
+- **Installer Files** (all in the same directory as `AutoInstall.exe`):
   - RadioSportChat MSI installer (`RadioSportChat-*.msi`).
   - Python 3.11 installer (`python-3.11.9-amd64.exe`).
   - `venv` subfolder containing:
     - `requirements.txt`
     - Pip package files (e.g., `streamlit*.whl`, `streamlit*.tar.gz`).
-- **Optional**: `sha256-*` model files in the script's directory for offline model installation.
-- **Optional**: `OllamaSetup.exe` in the script's directory (downloaded if absent and Ollama is not installed).
+- **Optional**: `sha256-*` model files in the program's directory for offline model installation.
+- **Optional**: `OllamaSetup.exe` in the program's directory (downloaded if absent and Ollama is not installed).
 - **Internet Connection**: Required for downloading Ollama (if not present) and pulling models.
 - **Disk Space**: At least 10 GB free for models and dependencies.
 - **Ollama Models**: If using custom model storage, set the `OLLAMA_MODELS` environment variable.
@@ -51,14 +51,14 @@ Before running `setup.bat`, ensure the following:
 ## Usage
 
 1. **Prepare the Environment**:
-   - Place `setup.bat`, `RadioSportChat-*.msi`, and `python-3.11.9-amd64.exe` in the same directory.
+   - Place `AutoInstall.exe`, `RadioSportChat-*.msi`, and `python-3.11.9-amd64.exe` in the same directory.
    - Create a `venv` subfolder containing `requirements.txt` and pip package files (e.g., `streamlit*.whl`).
-   - Optionally, include `sha256-*` model files and `OllamaSetup.exe` in the script's directory.
+   - Optionally, include `sha256-*` model files and `OllamaSetup.exe` in the program's directory.
 
-2. **Run the Script**:
+2. **Run the AutoInstaller**:
    - Open a Command Prompt as Administrator (`Run as Administrator`).
-   - Navigate to the script directory: `cd path\to\script\directory`.
-   - Execute the script: `setup.bat`.
+   - Navigate to the program directory: `cd path\to\program\directory`.
+   - Execute the program: `AutoInstall.exe`.
    - Follow any on-screen prompts (e.g., complete the RadioSportChat installer wizard).
 
 3. **Monitor Progress**:
@@ -67,7 +67,7 @@ Before running `setup.bat`, ensure the following:
      - Errors (e.g., `Error: Python installer not found...`).
      - Prompts (e.g., `Press any key to continue with setup...`).
      - Success messages (e.g., `Python 3.11 installation completed.`).
-   - All actions are logged to `setup.log` and `setup.log.models` (for `ollama list` output) in the script's directory or `%TEMP%` if unwritable.
+   - All actions are logged to `setup.log` and `setup.log.models` (for `ollama list` output) in the program's directory or `%TEMP%` if unwritable.
    - Check `setup.log` for detailed progress (e.g., `[17_57_23_45] Python 3.11 installed successfully`).
 
 4. **Post-Setup**:
@@ -75,7 +75,7 @@ Before running `setup.bat`, ensure the following:
    - If the app fails to start, check `setup.log` and follow the troubleshooting steps below.
    - Restart your command prompt or computer to apply PATH changes.
 
-## Script Functionality
+## AutoInstaller Functionality
 
 ### Installation Steps
 - **RadioSportChat**: Installs from `RadioSportChat-*.msi` or skips if already installed at `C:\Program Files\Radiosport\RadioSportChat` or user-specific paths.
@@ -94,7 +94,7 @@ Before running `setup.bat`, ensure the following:
 
 ### Model Handling
 - **Storage Verification**: Checks default (`C:\Users\%USERNAME%\.ollama\models\blobs`), custom (`%OLLAMA_MODELS%`), and alternative locations.
-- **Model Files**: Copies `sha256-*` files from the script's directory to the verified storage location.
+- **Model Files**: Copies `sha256-*` files from the program's directory to the verified storage location.
 - **Model Pulling**: Pulls required models if not present.
 - **Verification**: Runs `ollama list` before and after copying/pulling to confirm model recognition.
 
@@ -105,8 +105,8 @@ Before running `setup.bat`, ensure the following:
 
 ## Troubleshooting
 
-- **Script Fails with Permission Error**:
-  - Ensure you run `setup.bat` as Administrator.
+- **AutoInstaller Fails with Permission Error**:
+  - Ensure you run `AutoInstall.exe` as Administrator.
   - Check write permissions for `C:\Python`, `C:\venv`, and the Ollama model storage directory.
 
 - **Cannot Create C:\Python**:
@@ -135,7 +135,7 @@ Before running `setup.bat`, ensure the following:
         ```cmd
         C:\Python\python.exe --version
         ```
-        If not 3.11, uninstall the existing Python or delete `C:\Python` and rerun the script.
+        If not 3.11, uninstall the existing Python or delete `C:\Python` and rerun the program.
       - Ensure you’re running as Administrator:
         ```cmd
         net session
@@ -144,13 +144,13 @@ Before running `setup.bat`, ensure the following:
       - If the issue persists, check `setup.log` for details and ensure no other process is locking `C:\Python`.
 
 - **RadioSportChat Installer Not Found**:
-  - Verify `RadioSportChat-*.msi` is in the script's directory.
+  - Verify `RadioSportChat-*.msi` is in the program's directory.
   - Check the log (`radiosportchat_install.log`) for installer errors.
   - Ensure RadioSportChat is installed at `C:\Program Files\Radiosport\RadioSportChat` or a user-specific path.
 
 - **Syntax Error in RadioSportChat Installation Detection**:
   - If you see `The syntax of the command is incorrect` after `Starting RadioSportChat Installation Detection...`:
-    - Ensure the script uses the corrected condition:
+    - Ensure the program uses the corrected condition:
       ```bat
       ) else if exist "%USER_INSTALL_DIR3%\RadioSportChat.exe" (
       ```
@@ -178,19 +178,19 @@ Before running `setup.bat`, ensure the following:
     - If missing, run `RadioSportChat-*.msi` manually.
 
 - **Python Installation Fails**:
-  - Confirm `python-3.11.9-amd64.exe` is in the script's directory.
+  - Confirm `python-3.11.9-amd64.exe` is in the program's directory.
   - If `C:\Python` exists, verify `python.exe`:
     ```cmd
     dir C:\Python\python.exe
     C:\Python\python.exe --version
     ```
-    If missing or not 3.11, delete `C:\Python` and rerun the script.
+    If missing or not 3.11, delete `C:\Python` and rerun the program.
   - Check `setup.log` for errors like `Error: Failed to install Python 3.11...`.
 
 - **Excessive Console Output During Pip Installation**:
   - If you see multiple `processed file C:\venv ...` messages in the console:
-    - These messages are from pip’s stderr, which the script does not suppress (uses `>nul` for stdout only).
-    - To suppress both stdout and stderr, modify the `pip install` command in `setup.bat`:
+    - These messages are from pip’s stderr, which the program does not suppress (uses `>nul` for stdout only).
+    - 
       ```bat
       pip install --no-index --find-links=%SCRIPT_DIR%venv -r %SCRIPT_DIR%venv\requirements.txt >nul 2>nul
       ```
@@ -280,7 +280,7 @@ Before running `setup.bat`, ensure the following:
     If this fails, reinstall Ollama or check for conflicting instances.
 
 - **Ollama Models Not Recognized**:
-  - Verify `sha256-*` files in the script’s directory match the required models.
+  - Verify `sha256-*` files in the program’s directory match the required models.
   - Check `setup.log.models` for `ollama list` output.
   - Ensure internet connectivity for model pulling.
   - Confirm the model storage location (`C:\Users\%USERNAME%\.ollama\models\blobs` or `%OLLAMA_MODELS%`) is writable.
@@ -302,8 +302,8 @@ Before running `setup.bat`, ensure the following:
 - **Missing Success Messages**:
   - If a section’s success message (e.g., `Python 3.11 installation completed.`) is not shown, the section likely failed.
   - Check `setup.log` for errors or warnings in that section (e.g., `Error: Python installer not found...`).
-  - Verify the script exited cleanly (no `Press any key to exit...` without `Final instructions completed.`).
-  - Rerun the script and note which success messages are missing.
+  - Verify the program exited cleanly (no `Press any key to exit...` without `Final instructions completed.`).
+  - Rerun the program and note which success messages are missing.
 
 - **General Issues**:
   - Review `setup.log` and `setup.log.models` for detailed errors.
@@ -312,12 +312,12 @@ Before running `setup.bat`, ensure the following:
 
 ## Notes
 - **Custom Model Storage**: Set the `OLLAMA_MODELS` environment variable to use a non-default storage path.
-- **Offline Setup**: Include `sha256-*` files and `OllamaSetup.exe` in the script’s directory to avoid downloads.
+- **Offline Setup**: Include `sha256-*` files and `OllamaSetup.exe` in the program’s directory to avoid downloads.
 - **Logs**: Always check `setup.log` for a complete record of the setup process.
 - **PATH Changes**: Restart your system to apply PATH updates for `C:\venv\Scripts`, `C:\Program Files\Ollama`, or `C:\Users\%USERNAME%\AppData\Local\Programs\Ollama` (if added).
 
 ## License
-This script is provided as-is for use with RadioSportChat. No warranty is implied. Use at your own risk.
+This program is provided as-is for use with RadioSportChat. No warranty is implied. Use at your own risk.
 
 ---
 *... May 16, 2025*

@@ -1,0 +1,61 @@
+# Non-Commercial Use License for RadioSport Chat
+
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+
+This license governs the use of the RadioSport Chat software, including the file `rag.py` (the "Software"), all versions, as provided in the repository at https://github.com/rkarikari/RadioSport-chat.
+
+## Permissions
+
+You are free to:
+
+- **Use**: Run the Software for personal, non-commercial purposes.
+- **Copy**: Make copies of the Software for non-commercial use.
+- **Modify**: Adapt or modify the Software for non-commercial purposes.
+- **Share**: Distribute the Software or its modifications, provided all distributions are under this same license and for non-commercial purposes only.
+
+## Conditions
+
+The following conditions must be met:
+
+1. **Non-Commercial Use**: The Software may only be used for non-commercial purposes. Any commercial use, including but not limited to selling, licensing, or incorporating the Software into commercial products or services, is strictly prohibited.
+2. **Attribution**: You must include this license, the copyright notice, and a link to the original repository (https://github.com/rkarikari/RadioSport-chat) in all copies or substantial portions of the Software.
+3. **No Warranty**: The Software is provided "as is", without any warranties, express or implied, including but not limited to warranties of merchantability, fitness for a particular purpose, or non-infringement.
+4. **Modifications**: Any modified versions of the Software must clearly indicate that changes have been made and include this license.
+5. **Compliance**: You must comply with all applicable laws, including export control regulations, when using or distributing the Software.
+
+## Restrictions
+
+You may not:
+
+- Use the Software for any commercial purpose.
+- Sublicense the Software or grant rights to others beyond what this license permits.
+- Remove or alter the copyright notice or this license from the Software.
+- Hold the copyright holder or contributors liable for any damages arising from the use of the Software.
+
+## Termination
+
+Any use of the Software that violates the terms of this license will automatically terminate your rights under this license. The copyright holder reserves the right to enforce these terms and pursue legal action for unauthorized use.
+
+## Contact
+
+For questions about this license or to request permissions for uses not covered, please contact the copyright holder via the GitHub repository: https://github.com/rkarikari/RadioSport-chat.
+
+---
+
+**Last updated**: May 17, 2025
+
+This license applies to all versions of RadioSport Chat, including the `rag.py` file.
+
+**Copyright © 2025 Richard N Karikari. All rights reserved.**
