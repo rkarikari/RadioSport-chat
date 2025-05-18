@@ -30,8 +30,8 @@ import os
 #    pip install -r requirements.txt
 # 5. Install Ollama CLI from https://ollama.com/ and ensure it's running (ollama serve).
 # 6. Run the app from the project root:
-#    src\radiosportchat\venv\Scripts\python -m streamlit run src\radiosportchat\rag.py  # Windows
-#    src/radiosportchat/venv/bin/python -m streamlit run src/radiosportchat/rag.py     # Linux/macOS
+#    src\radiosportchat\venv\Scripts\python -m streamlit run src\radiosportchat\ragv3.py  # Windows
+#    src/radiosportchat/venv/bin/python -m streamlit run src/radiosportchat/ragv3.py     # Linux/macOS
 
 # Set page configuration
 st.set_page_config(
@@ -62,9 +62,14 @@ class StderrFilter:
         self.original_stderr.flush()
 
 # Version and Changelog
-VERSION = "v2.5.4"
+VERSION = "v2.5.9"
 CHANGELOG = """
 Changelog:
+- v2.5.9 (2025-05-18): Added 'RadioSport Chat 🧟' title and icon to the extreme top of the sidebar with large font, ensured no displacement of other sidebar elements.
+- v2.5.8 (2025-05-18): Removed LaTeX Expression controls from sidebar, renamed 'Math and Model Controls' to 'Model Controls', added reasoning mode toggle for Qwen3 models with /no_think query suffix when disabled, preserved MathJax functionality in main chat window.
+- v2.5.7 (2025-05-18): Fixed NameError by correcting `reasoning_window_css_mathjax_script` to `reasoning_window_css` in CSS injection.
+- v2.5.6 (2025-05-18): Replaced deprecated `retriever.get_relevant_documents` with `retriever.invoke` in RAG Mode to address LangChainDeprecationWarning from langchain-core 0.1.46.
+- v2.5.5 (2025-05-18): Added streaming support in RAG Mode with chat history integration, using manual document retrieval and streaming ChatOllama for real-time response display.
 - v2.5.4 (2025-05-15): Modified model fetching to use global 'ollama list' command, added error handling for missing Ollama CLI, and improved venv path validation.
 - v2.5.3 (2025-05-15): Updated venv path to src/radiosportchat/venv, adjusted Python executable paths in subprocess calls.
 - v2.5.2 (2025-05-15): Fixed SyntaxError in 3D Scatter section due to unterminated string literal in colors input.
@@ -121,7 +126,6 @@ def compute_file_hash(file):
 @st.cache_data
 def get_ollama_llm_models():
     try:
-        # Use global ollama CLI command
         result = subprocess.run(["ollama", "list"], capture_output=True, text=True, check=True)
         lines = result.stdout.splitlines()
         models = []
@@ -145,7 +149,6 @@ def get_ollama_llm_models():
 @st.cache_data
 def get_ollama_embedding_models():
     try:
-        # Use global ollama CLI command
         result = subprocess.run(["ollama", "list"], capture_output=True, text=True, check=True)
         lines = result.stdout.splitlines()
         models = []
@@ -168,7 +171,6 @@ def get_ollama_embedding_models():
 # Cached function to create qa_chain in RAG mode
 @st.cache_resource
 def create_qa_chain(_file_hashes, uploaded_files):
-    # Deduplicate files based on hashes
     unique_files = []
     seen_hashes = set()
     for file, file_hash in zip(uploaded_files, _file_hashes):
@@ -177,7 +179,6 @@ def create_qa_chain(_file_hashes, uploaded_files):
             seen_hashes.add(file_hash)
     
     documents = []
-    # Redirect stderr to filter CropBox warnings
     original_stderr = sys.stderr
     sys.stderr = StderrFilter(original_stderr)
     try:
@@ -190,7 +191,6 @@ def create_qa_chain(_file_hashes, uploaded_files):
                         text += extracted_text
                 documents.append(text)
     finally:
-        # Restore original stderr
         sys.stderr = original_stderr
     if documents:
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
@@ -218,7 +218,7 @@ def process_response(response):
     return cleaned_response
 
 # Generator function for streaming response
-def stream_response(llm, prompt):
+def stream_response(llm, prompt, is_qwen3=False, reasoning_enabled=True):
     accumulated_text = ""
     reasoning_text = []
     in_think_block = False
@@ -226,56 +226,55 @@ def stream_response(llm, prompt):
     think_end = "</think>"
     reasoning_window = st.session_state.reasoning_window
     
-    for chunk in llm.stream(prompt):
-        chunk_text = chunk.content
-        accumulated_text += chunk_text
-        
-        # Process chunk character by character to detect tags
-        i = 0
-        while i < len(chunk_text):
-            if not in_think_block:
-                # Look for <think>
-                if accumulated_text.endswith(think_start):
-                    in_think_block = True
-                    accumulated_text = accumulated_text[:-len(think_start)]
-                    i += len(think_start)
-                    continue
-                # Yield non-think text
-                if accumulated_text:
-                    cleaned_chunk = accumulated_text
-                    accumulated_text = ""
-                    if cleaned_chunk:
-                        yield cleaned_chunk
-                        # Clear reasoning window when non-think text starts
-                        reasoning_window.empty()
-            else:
-                # Look for </think>
-                if accumulated_text.endswith(think_end):
-                    in_think_block = False
-                    reasoning_content = accumulated_text[:-len(think_end)]
-                    if reasoning_content:
-                        reasoning_text.append(reasoning_content)
+    # Skip think tag processing if reasoning is disabled for Qwen3 models
+    if is_qwen3 and not reasoning_enabled:
+        for chunk in llm.stream(prompt):
+            chunk_text = chunk.content
+            yield chunk_text
+        return prompt  # Return original prompt as cleaned response
+    else:
+        for chunk in llm.stream(prompt):
+            chunk_text = chunk.content
+            accumulated_text += chunk_text
+            
+            i = 0
+            while i < len(chunk_text):
+                if not in_think_block:
+                    if accumulated_text.endswith(think_start):
+                        in_think_block = True
+                        accumulated_text = accumulated_text[:-len(think_start)]
+                        i += len(think_start)
+                        continue
+                    if accumulated_text:
+                        cleaned_chunk = accumulated_text
+                        accumulated_text = ""
+                        if cleaned_chunk:
+                            yield cleaned_chunk
+                            reasoning_window.empty()
+                else:
+                    if accumulated_text.endswith(think_end):
+                        in_think_block = False
+                        reasoning_content = accumulated_text[:-len(think_end)]
+                        if reasoning_content:
+                            reasoning_text.append(reasoning_content)
+                            content = f'<div id="thinking-window" class="thinking-window">{" ".join(reasoning_text)}</div>'
+                            reasoning_window.markdown(content, unsafe_allow_html=True)
+                        accumulated_text = ""
+                        i += len(think_end)
+                        continue
+                    if accumulated_text:
+                        reasoning_text.append(accumulated_text)
                         content = f'<div id="thinking-window" class="thinking-window">{" ".join(reasoning_text)}</div>'
                         reasoning_window.markdown(content, unsafe_allow_html=True)
-                    accumulated_text = ""
-                    i += len(think_end)
-                    continue
-                # Accumulate reasoning text
-                if accumulated_text:
-                    reasoning_text.append(accumulated_text)
-                    content = f'<div id="thinking-window" class="thinking-window">{" ".join(reasoning_text)}</div>'
-                    reasoning_window.markdown(content, unsafe_allow_html=True)
-                    accumulated_text = ""
-            i += 1
-    
-    # Handle any remaining non-think text
-    if accumulated_text and not in_think_block:
-        yield accumulated_text
-        reasoning_window.empty()
-    
-    # Return cleaned response for chat history
-    cleaned_response = process_response(" ".join(reasoning_text) + accumulated_text)
-    return cleaned_response
+                        accumulated_text = ""
+                i += 1
+        
+        if accumulated_text and not in_think_block:
+            yield accumulated_text
+            reasoning_window.empty()
+        
+        cleaned_response = process_response(" ".join(reasoning_text) + accumulated_text)
+        return cleaned_response
 
 # Initialize session state
 if 'chat_history' not in st.session_state:
@@ -286,24 +285,40 @@ if 'qa_chain' not in st.session_state:
     st.session_state.qa_chain = None
 if 'graph_image' not in st.session_state:
     st.session_state.graph_image = None
-if 'latex_expressions' not in st.session_state:
-    st.session_state.latex_expressions = []
 if 'selected_model' not in st.session_state:
     st.session_state.selected_model = "granite3.3:2b"
 if 'selected_embedding_model' not in st.session_state:
     st.session_state.selected_embedding_model = "nomic-embed-text:latest"
+if 'latex_expressions' not in st.session_state:
+    st.session_state.latex_expressions = []
 if 'reasoning_window' not in st.session_state:
     st.session_state.reasoning_window = None
+if 'reasoning_enabled' not in st.session_state:
+    st.session_state.reasoning_enabled = True
 
-# Sidebar for mode selection, document loading, LaTeX, model selection, and graphing controls
+# Sidebar for mode selection, document loading, model controls, and graphing controls
 with st.sidebar:
-    st.header("Chat Mode")
+    st.markdown("""
+    <style>
+    .sidebar-title {
+        font-size: 24px;
+        font-weight: bold;
+        margin: 0;
+        padding: 5px 0;
+        text-align: left;
+        color: #333;
+    }
+    </style>
+    <div class="sidebar-title">RadioSport Chat 🧟</div>
+    """, unsafe_allow_html=True)
+    st.markdown(f"Version {VERSION}")
+    st.markdown("<br>", unsafe_allow_html=True)
+    
     chat_mode = st.selectbox("Select chat mode", ["RAG Mode", "Direct Model Mode"])
     
     st.header("Document Loader")
     uploaded_files = st.file_uploader("Upload PDF documents", type="pdf", accept_multiple_files=True)
     
-    # Progress bar for document loading
     if uploaded_files:
         progress_bar = st.progress(0)
         total_files = len(uploaded_files)
@@ -318,17 +333,14 @@ with st.sidebar:
         else:
             st.error("No valid text extracted from uploaded documents.")
     
-    # Math and Model Controls expander
-    with st.expander("Math and Model Controls", expanded=False):
+    with st.expander("Model Controls", expanded=False):
         st.subheader("Model Selection")
         available_llm_models = get_ollama_llm_models()
         available_embedding_models = get_ollama_embedding_models()
         
-        # Set fixed models for RAG mode, otherwise use session state
         display_llm_model = "granite3.3:2b" if chat_mode == "RAG Mode" else st.session_state.selected_model
         display_embedding_model = "nomic-embed-text:latest" if chat_mode == "RAG Mode" else st.session_state.selected_embedding_model
         
-        # Render dropdowns
         llm_index = available_llm_models.index(display_llm_model) if display_llm_model in available_llm_models else 0
         embedding_index = available_embedding_models.index(display_embedding_model) if display_embedding_model in available_embedding_models else 0
         
@@ -345,24 +357,20 @@ with st.sidebar:
             disabled=(chat_mode == "RAG Mode")
         )
         
-        # Update session state only in Direct Model Mode
         if chat_mode == "Direct Model Mode":
             st.session_state.selected_model = selected_llm
             st.session_state.selected_embedding_model = selected_embedding
         
-        # Add note for RAG mode
         if chat_mode == "RAG Mode":
             st.markdown("*Note: RAG Mode uses fixed models (LLM: granite3.3:2b, Embedding: nomic-embed-text:latest).*")
         
-        st.subheader("LaTeX Expression")
-        latex_expr = st.text_input("Enter LaTeX expression (e.g., \\frac{1}{2})", "\\frac{\\sum_{i=1}^{77}i}{\\sum_{i=1}^7i}")
-        if st.button("Render LaTeX Expression"):
-            if latex_expr:
-                st.session_state.latex_expressions.append(latex_expr)
-            else:
-                st.error("Please enter a valid LaTeX expression.")
+        st.subheader("Reasoning Mode")
+        st.session_state.reasoning_enabled = st.toggle(
+            "Enable reasoning for Qwen3 models",
+            value=st.session_state.reasoning_enabled,
+            help="When disabled, appends '/no_think' to queries for Qwen3 models to skip reasoning steps."
+        )
     
-    # Graphing controls in a collapsed expander
     with st.expander("Graphing Controls", expanded=False):
         graph_type = st.selectbox("Select graph type", [
             "Parametric", "Function", "Polar", "Scatter", "3D Surface", "3D Scatter", "3D Line", 
@@ -781,7 +789,7 @@ with st.sidebar:
                 elif graph_type == "3D Line":
                     if data_source == "Manual Input":
                         x = [float(x) for x in x_points.split(",") if x.strip()]
-                        y = [float(y) for y in y_points.split(",") if y.strip()]
+                        y = [float(y) for y in y_points.split(",") if x.strip()]
                         z = [float(z) for z in z_points.split(",") if z.strip()]
                         if not (len(x) == len(y) == len(z)):
                             raise ValueError("X, Y, and Z coordinates must have the same number of points")
@@ -802,7 +810,7 @@ with st.sidebar:
                     y = np.linspace(y_min, y_max, 100)
                     X, Y = np.meshgrid(x, y)
                     Z = eval(z_eq, {"x": X, "y": Y, "np": np, "sin": np.sin, "cos": np.cos, "exp": np.exp})
-                    ax.contour(X, Y, Z, levels=levels, cmap='viridis')
+                    plt.contour(X, Y, Z, levels=levels, cmap='viridis')
                     ax.set_xlabel("x")
                     ax.set_ylabel("y")
                     ax.grid(True)
@@ -990,23 +998,6 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Error generating graph: {str(e)}")
 
-# Inject MathJax for LaTeX rendering
-mathjax_script = """
-<script src="/static/mathjax/es5/tex-chtml.js" id="MathJax-script" async></script>
-<script>
-    MathJax = {
-        tex: {
-            inlineMath: [['$', '$'], ['\\(', '\\)']],
-            displayMath: [['$$', '$$'], ['\\[', '\\]']]
-        },
-        chtml: {
-            scale: 1.1
-        }
-    };
-</script>
-"""
-components.html(mathjax_script, height=0)
-
 # Inject CSS for floating reasoning window
 reasoning_window_css = """
 <style>
@@ -1062,25 +1053,41 @@ title_position_css = """
 """
 st.markdown(title_position_css, unsafe_allow_html=True)
 
+# Inject MathJax for LaTeX rendering
+mathjax_script = """
+<script>
+MathJax = {
+  tex: {
+    inlineMath: [['$', '$'], ['\\(', '\\)']],
+    displayMath: [['$$', '$$'], ['\\[', '\\]']],
+    processEscapes: true
+  },
+  svg: {
+    fontCache: 'global'
+  }
+};
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+"""
+components.html(mathjax_script, height=0)
+
 # Main chat interface
 st.title("RadioSport Chat")
-st.markdown(f"Version {VERSION}")
 
-# Floating window placeholder (separate from chat container)
+# Floating window placeholder
 st.session_state.reasoning_window = st.empty()
 
 # Display chat history
 chat_container = st.container()
 with chat_container:
+    for expr in st.session_state.latex_expressions:
+        st.markdown(f"${expr}$")
     for message in st.session_state.chat_history:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
     
     if st.session_state.graph_image:
         st.image(st.session_state.graph_image)
-    
-    for expr in st.session_state.latex_expressions:
-        st.markdown(f"${expr}$")
 
 # Chat input at bottom
 user_input = st.chat_input("Ask a question...")
@@ -1090,7 +1097,7 @@ if st.button("Clear Chat History"):
     st.session_state.chat_history = []
     st.session_state.graph_image = None
     st.session_state.latex_expressions = []
-    st.session_state.reasoning_window.empty()  # Clear reasoning window
+    st.session_state.reasoning_window.empty()
     st.rerun()
 
 # Process user query
@@ -1098,16 +1105,51 @@ if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
     
+    # Append /no_think for Qwen3 models if reasoning is disabled
+    is_qwen3 = "qwen3" in st.session_state.selected_model.lower()
+    modified_input = user_input
+    if is_qwen3 and not st.session_state.reasoning_enabled:
+        modified_input = f"{user_input} /no_think"
+    
     st.session_state.chat_history.append({"role": "user", "content": user_input})
     
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             if chat_mode == "RAG Mode":
                 if st.session_state.qa_chain:
-                    response = st.session_state.qa_chain.invoke({"query": user_input})["result"]
-                    cleaned_response = process_response(response)
-                    st.markdown(cleaned_response)
-                    st.session_state.chat_history.append({"role": "assistant", "content": cleaned_response})
+                    try:
+                        retriever = st.session_state.qa_chain.retriever
+                        docs = retriever.invoke(user_input)
+                        context = "\n\n".join([doc.page_content for doc in docs])
+                        
+                        MAX_HISTORY_LENGTH = 5
+                        history = []
+                        for msg in st.session_state.chat_history[-2*MAX_HISTORY_LENGTH:-1]:
+                            if msg["role"] == "user":
+                                history.append(f"User: {msg['content']}")
+                            else:
+                                history.append(f"Assistant: {msg['content']}")
+                        history_str = "\n".join(history)
+                        
+                        # Use modified_input for RAG mode (fixed to granite3.3:2b, so no Qwen3 check needed)
+                        prompt = (
+                            "You are an assistant. Use the following conversation history and relevant documents to provide accurate and context-aware responses. "
+                            "Pay attention to any corrections or clarifications provided and avoid repeating errors.\n\n"
+                            f"Previous conversation:\n{history_str}\n\n"
+                            f"Relevant documents:\n{context}\n\n"
+                            f"Current question: {modified_input}\n\n"
+                            "Assistant: "
+                        )
+                        
+                        llm_stream = ChatOllama(model="granite3.3:2b", base_url="http://localhost:11434", streaming=True)
+                        
+                        # Since RAG uses granite3.3:2b, is_qwen3 is False
+                        cleaned_response = st.write_stream(stream_response(llm_stream, prompt, is_qwen3=False, reasoning_enabled=st.session_state.reasoning_enabled))
+                        if cleaned_response:
+                            st.session_state.chat_history.append({"role": "assistant", "content": cleaned_response})
+                    except Exception as e:
+                        st.error(f"Error in RAG Mode: {str(e)}")
+                        st.session_state.reasoning_window.empty()
                 else:
                     st.warning("Please upload and process documents for RAG Mode.")
             else:  # Direct Model Mode
@@ -1119,10 +1161,9 @@ if user_input:
                             prompt += f"User: {msg['content']}\n"
                         else:
                             prompt += f"Assistant: {msg['content']}\n"
-                    prompt += f"User: {user_input}\nAssistant: "
+                    prompt += f"User: {modified_input}\nAssistant: "
                     
-                    # Stream response
-                    cleaned_response = st.write_stream(stream_response(llm, prompt))
+                    cleaned_response = st.write_stream(stream_response(llm, prompt, is_qwen3=is_qwen3, reasoning_enabled=st.session_state.reasoning_enabled))
                     if cleaned_response:
                         st.session_state.chat_history.append({"role": "assistant", "content": cleaned_response})
                     
