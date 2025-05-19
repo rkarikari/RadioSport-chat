@@ -3,6 +3,7 @@ from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 import pdfplumber
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,24 +19,9 @@ import warnings
 import sys
 import os
 
-# Instructions for setting up the local virtual environment:
-# 1. Ensure a Python installation is available (e.g., portable Python in ./python or system Python).
-# 2. Create a virtual environment in src/radiosportchat/venv:
-#    .\python\python.exe -m venv src\radiosportchat\venv  # Windows
-#    ./python/bin/python3 -m venv src/radiosportchat/venv  # Linux/macOS
-# 3. Activate the venv:
-#    src\radiosportchat\venv\Scripts\activate  # Windows
-#    source src/radiosportchat/venv/bin/activate  # Linux/macOS
-# 4. Install dependencies:
-#    pip install -r requirements.txt
-# 5. Install Ollama CLI from https://ollama.com/ and ensure it's running (ollama serve).
-# 6. Run the app from the project root:
-#    src\radiosportchat\venv\Scripts\python -m streamlit run src\radiosportchat\ragv3.py  # Windows
-#    src/radiosportchat/venv/bin/python -m streamlit run src/radiosportchat/ragv3.py     # Linux/macOS
-
 # Set page configuration
 st.set_page_config(
-    page_title="RadioSport Chat",
+    page_title="PnP RadioSport Chat",
     page_icon="🧟",
     layout="centered",
     menu_items={
@@ -62,55 +48,14 @@ class StderrFilter:
         self.original_stderr.flush()
 
 # Version and Changelog
-VERSION = "v2.5.9"
+VERSION = "v2.6.4"
 CHANGELOG = """
 Changelog:
-- v2.5.9 (2025-05-18): Added 'RadioSport Chat 🧟' title and icon to the extreme top of the sidebar with large font, ensured no displacement of other sidebar elements.
-- v2.5.8 (2025-05-18): Removed LaTeX Expression controls from sidebar, renamed 'Math and Model Controls' to 'Model Controls', added reasoning mode toggle for Qwen3 models with /no_think query suffix when disabled, preserved MathJax functionality in main chat window.
-- v2.5.7 (2025-05-18): Fixed NameError by correcting `reasoning_window_css_mathjax_script` to `reasoning_window_css` in CSS injection.
-- v2.5.6 (2025-05-18): Replaced deprecated `retriever.get_relevant_documents` with `retriever.invoke` in RAG Mode to address LangChainDeprecationWarning from langchain-core 0.1.46.
-- v2.5.5 (2025-05-18): Added streaming support in RAG Mode with chat history integration, using manual document retrieval and streaming ChatOllama for real-time response display.
-- v2.5.4 (2025-05-15): Modified model fetching to use global 'ollama list' command, added error handling for missing Ollama CLI, and improved venv path validation.
-- v2.5.3 (2025-05-15): Updated venv path to src/radiosportchat/venv, adjusted Python executable paths in subprocess calls.
-- v2.5.2 (2025-05-15): Fixed SyntaxError in 3D Scatter section due to unterminated string literal in colors input.
-- v2.5.1 (2025-05-14): Updated to use local virtual environment (venv) for all Python dependencies, eliminating system-wide Python requirements.
-- v2.5.0 (2025-05-14): Added st.set_page_config with custom page title, zombie icon, centered layout, and menu items for bug reporting and about info.
-- v2.4.14 (2025-05-14): Added custom CSS to reduce top padding, shifting the title "RadioSport Chat" higher on the screen.
-- v2.4.13 (2025-05-14): Removed all unnecessary logging, including pdfplumber logging level print and PDF processing debug prints, to streamline console output and improve performance.
-- v2.4.12 (2025-05-14): Replaced deprecated `run` with `invoke` for RAG mode to address LangChain deprecation warning, moved pdfplumber logging to function to run once, added file deduplication to prevent repeated PDF processing.
-- v2.4.11 (2025-05-14): Added stderr filtering to suppress CropBox warnings during PDF processing, added debug logging for PDF page count.
-- v2.4.10 (2025-05-14): Added warnings.filterwarnings to suppress pdfplumber UserWarning for CropBox issue, in addition to logging suppression.
-- v2.4.9 (2025-05-14): Added debug print to verify pdfplumber logging level and commented alternative warnings suppression for CropBox warning.
-- v2.4.8 (2025-05-14): Suppressed pdfplumber warning "Cropbox missing from /Page, defaulting to Mediabox" by setting logging level to ERROR.
-- v2.4.7 (2025-05-14): Fixed warning "Please upload a CSV file" by displaying it only when CSV File data source is selected and no file is uploaded. Corrected typo in Stacked Bar warning message ("honour" to "a").
-- v2.4.6 (2025-05-14): Optimized for 200% performance boost:
-  - Replaced PyPDF2 with pdfplumber for faster PDF text extraction.
-  - Cached qa_chain creation in RAG mode using st.cache_resource with file hashes.
-  - Cached list of available models using st.cache_data.
-- v2.4.5 (2025-05-13): Implemented periodic scrolling for the floating reasoning window using setInterval to ensure it scrolls to the bottom during streaming.
-- v2.4.4 (2025-05-13): Added setTimeout to the scrolling script in the floating reasoning window to ensure it scrolls to the bottom after content updates.
-- v2.4.3 (2025-05-13): Enabled automatic scrolling for the floating reasoning window to keep the last line visible. Added backdrop blur to the floating window for better text visibility.
-- v2.4.2 (2025-05-12): Added support for Bar, Column, Stacked Bar, Pie Chart, Histogram, Line Chart, Area Chart, 3D Scatter, 3D Line, Waterfall Chart, Radar Chart, Box Plot, Violin Plot, and Error Bar graph types, with CSV support where applicable.
-- v2.4.1 (2025-05-12): Added CSV file upload support for Scatter graph type, allowing users to select columns for X, Y, sizes, and colors.
-- v2.4.0 (2025-05-12): Added support for Polar, Scatter, 3D Surface, and Contour graph types in the Graphing Controls section.
-- v2.3.11 (2025-05-11): Prevented session state updates in RAG mode and added UI note to clarify fixed models (nomic-embed-text:latest and granite3.3:2b).
-- v2.3.10 (2025-05-11): Fixed IndentationError in stream_response function by removing erroneous '- \' line.
-- v2.3.9 (2025-05-09): Updated RAG mode to display nomic-embed-text:latest and granite3.3:2b in disabled dropdowns to accurately reflect the models used.
-- v2.3.8 (2025-05-09): Disabled model selection dropdowns in RAG mode to prevent user confusion.
-- v2.3.7 (2025-05-09): Restricted RAG mode to use nomic-embed-text:latest for embedding model and granite3.3:2b for LLM model.
-- v2.3.6 (2025-05-09): Updated default LaTeX expression to \\frac{\\sum_{i=1}^{77}i}{\\sum_{i=1}^7i}.
-- v2.3.5 (2025-05-09): Updated default x parametric equation to sin(t)*(np.exp(cos(t))-2*cos(4*t)-sin(t/12)**5), y parametric equation to cos(t)*(np.exp(cos(t))-2*cos(4*t)-sin(t/12)**5), default embedder to nomic-embed-text:latest, and default language model to granite3.3:2b.
-- v2.3.4 (2025-05-09): Reduced floating window maximum width to 400px.
-- v2.3.3 (2025-05-09): Reduced floating window minimum width to 400px.
-- v2.3.2 (2025-05-09): Fixed SyntaxError in stream_response function by removing erroneous 'GRID' from cleaned_response assignment.
-- v2.3.1 (2025-05-09): Updated floating window CSS to auto-scroll to last line, transparent background, blue text, minimum width 500px, maximum height 300px.
-- v2.3.0 (2025-05-09): Implemented separate floating chat window for <think>...</think> text, cleared after </think>, with non-reasoning text streaming to main chat window.
-- v2.2.5 (2025-05-09): Fixed SyntaxError, but floating window was not a separate chat window and text routing was incorrect.
-- v2.2.4 (2025-05-09): Attempted to fix floating window and streaming, but introduced SyntaxError with 'yield' outside function.
-- v2.2.3 (2025-05-09): Fixed floating window to be single-line, horizontal, but window did not show and streaming was broken.
-- v2.2.2 (2025-05-09): Attempted <think>...</think> filtering with floating window (incorrectly displayed as column).
-- v2.2.1 (2025-05-09): Added version tracking and version number display under title.
-- v2.2.0 (2025-05-09): Base version with model selection, LaTeX in expander, separate LLM/embedding models, and chat history context.
+- v2.6.4 (2025-05-18): Ensured image upload controls are visible in sidebar for vision models in Direct Model Mode, added fallback message for non-vision models. Fixed deprecation warning by replacing use_column_width with use_container_width in st.image calls.
+- v2.6.3 (2025-05-18): Updated to display uploaded images in the main chat window for user queries in Direct Model Mode with vision models.
+- v2.6.2 (2025-05-18): Removed 'Document Loader' label from sidebar to save space, moved image upload controls to sidebar below PDF upload controls.
+- v2.6.1 (2025-05-18): Added support for gemma3:* and qwen2.5vl:* as vision models, enabling image uploading for these models in Direct Model Mode.
+- v2.6.0 (2025-05-18): Added support for vision LLM models in Direct Model Mode, including image uploading and processing with base64 encoding, refactored input to use messages instead of prompt strings.
 """
 
 # Function to compute file hash
@@ -133,10 +78,14 @@ def get_ollama_llm_models():
             model_name = line.split()[0].strip()
             if not (model_name.startswith('all-minilm') or model_name.startswith('nomic-embed')):
                 if model_name and model_name not in models:
-                    models.append(model_name)
+                    if model_name.startswith('gemma3:') or model_name.startswith('qwen2.5vl:') or 'llava' in model_name.lower():
+                        display_name = model_name + " (vision)"
+                    else:
+                        display_name = model_name
+                    models.append(display_name)
         return models if models else ["granite3.3:2b"]
     except FileNotFoundError:
-        st.error("Ollama CLI not found. Please install Ollama from https://ollama.com/ and ensure it's accessible in your system PATH.")
+        st.error("Ollama CLI not found. Please install Ollama from https://ollama.com/.")
         return ["granite3.3:2b"]
     except subprocess.CalledProcessError as e:
         st.error(f"Error running 'ollama list': {str(e)}. Ensure Ollama is running (ollama serve).")
@@ -159,7 +108,7 @@ def get_ollama_embedding_models():
                     models.append(model_name)
         return models if models else ["nomic-embed-text:latest"]
     except FileNotFoundError:
-        st.error("Ollama CLI not found. Please install Ollama from https://ollama.com/ and ensure it's accessible in your system PATH.")
+        st.error("Ollama CLI not found. Please install Ollama from https://ollama.com/.")
         return ["nomic-embed-text:latest"]
     except subprocess.CalledProcessError as e:
         st.error(f"Error running 'ollama list': {str(e)}. Ensure Ollama is running (ollama serve).")
@@ -211,14 +160,8 @@ def create_qa_chain(_file_hashes, uploaded_files):
             return qa_chain
     return None
 
-# Function to process RAG response (non-streaming)
-def process_response(response):
-    think_pattern = r'<think>(.*?)</think>'
-    cleaned_response = re.sub(think_pattern, '', response).strip()
-    return cleaned_response
-
 # Generator function for streaming response
-def stream_response(llm, prompt, is_qwen3=False, reasoning_enabled=True):
+def stream_response(stream, is_qwen3=False, reasoning_enabled=True):
     accumulated_text = ""
     reasoning_text = []
     in_think_block = False
@@ -226,14 +169,12 @@ def stream_response(llm, prompt, is_qwen3=False, reasoning_enabled=True):
     think_end = "</think>"
     reasoning_window = st.session_state.reasoning_window
     
-    # Skip think tag processing if reasoning is disabled for Qwen3 models
     if is_qwen3 and not reasoning_enabled:
-        for chunk in llm.stream(prompt):
-            chunk_text = chunk.content
-            yield chunk_text
-        return prompt  # Return original prompt as cleaned response
+        for chunk in stream:
+            yield chunk.content
+        return
     else:
-        for chunk in llm.stream(prompt):
+        for chunk in stream:
             chunk_text = chunk.content
             accumulated_text += chunk_text
             
@@ -272,9 +213,6 @@ def stream_response(llm, prompt, is_qwen3=False, reasoning_enabled=True):
         if accumulated_text and not in_think_block:
             yield accumulated_text
             reasoning_window.empty()
-        
-        cleaned_response = process_response(" ".join(reasoning_text) + accumulated_text)
-        return cleaned_response
 
 # Initialize session state
 if 'chat_history' not in st.session_state:
@@ -295,6 +233,8 @@ if 'reasoning_window' not in st.session_state:
     st.session_state.reasoning_window = None
 if 'reasoning_enabled' not in st.session_state:
     st.session_state.reasoning_enabled = True
+if 'uploaded_image' not in st.session_state:
+    st.session_state.uploaded_image = None
 
 # Sidebar for mode selection, document loading, model controls, and graphing controls
 with st.sidebar:
@@ -316,8 +256,32 @@ with st.sidebar:
     
     chat_mode = st.selectbox("Select chat mode", ["RAG Mode", "Direct Model Mode"])
     
-    st.header("Document Loader")
     uploaded_files = st.file_uploader("Upload PDF documents", type="pdf", accept_multiple_files=True)
+    
+    # Image uploader for vision models in Direct Model Mode
+    if chat_mode == "Direct Model Mode":
+        is_vision_model = (
+            st.session_state.selected_model.startswith('gemma3:') or
+            st.session_state.selected_model.startswith('qwen2.5vl:') or
+            'llava' in st.session_state.selected_model.lower()
+        )
+        if is_vision_model:
+            st.markdown("### Image Upload")
+            uploaded_image = st.file_uploader(
+                "Upload an image (optional)",
+                type=["jpg", "png", "jpeg"],
+                key="vision_image_uploader"
+            )
+            if uploaded_image:
+                st.session_state.uploaded_image = uploaded_image
+                st.success("Image uploaded successfully!")
+            else:
+                st.session_state.uploaded_image = None
+        else:
+            st.session_state.uploaded_image = None
+            st.info("Image upload is available only with vision-capable models (e.g., gemma3:*, qwen2.5vl:*, llava:*).")
+    else:
+        st.session_state.uploaded_image = None
     
     if uploaded_files:
         progress_bar = st.progress(0)
@@ -338,13 +302,14 @@ with st.sidebar:
         available_llm_models = get_ollama_llm_models()
         available_embedding_models = get_ollama_embedding_models()
         
-        display_llm_model = "granite3.3:2b" if chat_mode == "RAG Mode" else st.session_state.selected_model
+        llm_model_dict = {display: display.split(" (vision)")[0] for display in available_llm_models}
+        display_llm_model = "granite3.3:2b" if chat_mode == "RAG Mode" else next((k for k, v in llm_model_dict.items() if v == st.session_state.selected_model), available_llm_models[0])
         display_embedding_model = "nomic-embed-text:latest" if chat_mode == "RAG Mode" else st.session_state.selected_embedding_model
         
         llm_index = available_llm_models.index(display_llm_model) if display_llm_model in available_llm_models else 0
         embedding_index = available_embedding_models.index(display_embedding_model) if display_embedding_model in available_embedding_models else 0
         
-        selected_llm = st.selectbox(
+        selected_llm_display = st.selectbox(
             "Select LLM model",
             available_llm_models,
             index=llm_index,
@@ -358,7 +323,7 @@ with st.sidebar:
         )
         
         if chat_mode == "Direct Model Mode":
-            st.session_state.selected_model = selected_llm
+            st.session_state.selected_model = llm_model_dict[selected_llm_display]
             st.session_state.selected_embedding_model = selected_embedding
         
         if chat_mode == "RAG Mode":
@@ -1084,6 +1049,8 @@ with chat_container:
         st.markdown(f"${expr}$")
     for message in st.session_state.chat_history:
         with st.chat_message(message["role"]):
+            if message.get("image"):
+                st.image(message["image"], caption="Uploaded Image", use_container_width=True)
             st.markdown(message["content"])
     
     if st.session_state.graph_image:
@@ -1098,11 +1065,14 @@ if st.button("Clear Chat History"):
     st.session_state.graph_image = None
     st.session_state.latex_expressions = []
     st.session_state.reasoning_window.empty()
+    st.session_state.uploaded_image = None
     st.rerun()
 
 # Process user query
 if user_input:
     with st.chat_message("user"):
+        if st.session_state.uploaded_image:
+            st.image(st.session_state.uploaded_image, caption="Uploaded Image", use_container_width=True)
         st.markdown(user_input)
     
     # Append /no_think for Qwen3 models if reasoning is disabled
@@ -1111,7 +1081,11 @@ if user_input:
     if is_qwen3 and not st.session_state.reasoning_enabled:
         modified_input = f"{user_input} /no_think"
     
-    st.session_state.chat_history.append({"role": "user", "content": user_input})
+    st.session_state.chat_history.append({
+        "role": "user",
+        "content": user_input,
+        "image": st.session_state.uploaded_image if st.session_state.uploaded_image else None
+    })
     
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
@@ -1122,29 +1096,19 @@ if user_input:
                         docs = retriever.invoke(user_input)
                         context = "\n\n".join([doc.page_content for doc in docs])
                         
-                        MAX_HISTORY_LENGTH = 5
-                        history = []
-                        for msg in st.session_state.chat_history[-2*MAX_HISTORY_LENGTH:-1]:
+                        messages = [
+                            SystemMessage(content=f"Use the following documents to answer the question:\n\n{context}")
+                        ]
+                        for msg in st.session_state.chat_history[:-1]:
                             if msg["role"] == "user":
-                                history.append(f"User: {msg['content']}")
+                                messages.append(HumanMessage(content=msg["content"]))
                             else:
-                                history.append(f"Assistant: {msg['content']}")
-                        history_str = "\n".join(history)
+                                messages.append(AIMessage(content=msg["content"]))
+                        messages.append(HumanMessage(content=modified_input))
                         
-                        # Use modified_input for RAG mode (fixed to granite3.3:2b, so no Qwen3 check needed)
-                        prompt = (
-                            "You are an assistant. Use the following conversation history and relevant documents to provide accurate and context-aware responses. "
-                            "Pay attention to any corrections or clarifications provided and avoid repeating errors.\n\n"
-                            f"Previous conversation:\n{history_str}\n\n"
-                            f"Relevant documents:\n{context}\n\n"
-                            f"Current question: {modified_input}\n\n"
-                            "Assistant: "
-                        )
-                        
-                        llm_stream = ChatOllama(model="granite3.3:2b", base_url="http://localhost:11434", streaming=True)
-                        
-                        # Since RAG uses granite3.3:2b, is_qwen3 is False
-                        cleaned_response = st.write_stream(stream_response(llm_stream, prompt, is_qwen3=False, reasoning_enabled=st.session_state.reasoning_enabled))
+                        llm = ChatOllama(model="granite3.3:2b", base_url="http://localhost:11434")
+                        response_stream = llm.stream(messages)
+                        cleaned_response = st.write_stream(stream_response(response_stream, is_qwen3=False, reasoning_enabled=st.session_state.reasoning_enabled))
                         if cleaned_response:
                             st.session_state.chat_history.append({"role": "assistant", "content": cleaned_response})
                     except Exception as e:
@@ -1154,21 +1118,32 @@ if user_input:
                     st.warning("Please upload and process documents for RAG Mode.")
             else:  # Direct Model Mode
                 try:
-                    llm = ChatOllama(model=st.session_state.selected_model, base_url="http://localhost:11434", streaming=True)
-                    prompt = "You are an assistant. Use the following conversation history to provide accurate and context-aware responses. Pay attention to any corrections or clarifications provided and avoid repeating errors.\n\n"
+                    llm = ChatOllama(model=st.session_state.selected_model, base_url="http://localhost:11434")
+                    messages = []
                     for msg in st.session_state.chat_history[:-1]:
                         if msg["role"] == "user":
-                            prompt += f"User: {msg['content']}\n"
+                            messages.append(HumanMessage(content=msg["content"]))
                         else:
-                            prompt += f"Assistant: {msg['content']}\n"
-                    prompt += f"User: {modified_input}\nAssistant: "
+                            messages.append(AIMessage(content=msg["content"]))
                     
-                    cleaned_response = st.write_stream(stream_response(llm, prompt, is_qwen3=is_qwen3, reasoning_enabled=st.session_state.reasoning_enabled))
+                    if st.session_state.uploaded_image:
+                        image_data = base64.b64encode(st.session_state.uploaded_image.getvalue()).decode()
+                        mime_type = st.session_state.uploaded_image.type
+                        image_content = {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime_type};base64,{image_data}"}
+                        }
+                        messages.append(HumanMessage(content=[{"type": "text", "text": modified_input}, image_content]))
+                    else:
+                        messages.append(HumanMessage(content=modified_input))
+                    
+                    response_stream = llm.stream(messages)
+                    cleaned_response = st.write_stream(stream_response(response_stream, is_qwen3=is_qwen3, reasoning_enabled=st.session_state.reasoning_enabled))
                     if cleaned_response:
                         st.session_state.chat_history.append({"role": "assistant", "content": cleaned_response})
-                    
+                    st.session_state.uploaded_image = None  # Clear image after processing
                 except Exception as e:
-                    st.error(f"Error connecting to Ollama in Direct Model Mode: {str(e)}")
+                    st.error(f"Error in Direct Model Mode: {str(e)}")
                     st.session_state.reasoning_window.empty()
 
 # Add script for periodic scrolling of the reasoning window
